@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=autosplit_studio
+X-Python-2-Compatible=false
+X-Krita-Manual=
+Name=AutoSplit Studio
+Comment=Split a character image into parts via ComfyUI SAM3

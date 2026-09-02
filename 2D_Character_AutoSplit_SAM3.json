@@ -1,0 +1,246 @@
+{
+  "1": {
+    "inputs": {
+      "image": "Salena Turnaround FA large.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "3": {
+    "inputs": {
+      "images": [
+        "23",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Depth Map Preview"
+    }
+  },
+  "10": {
+    "inputs": {
+      "model": "sam3.pt",
+      "segmentor": "image",
+      "device": "cuda",
+      "precision": "fp32"
+    },
+    "class_type": "easy sam3ModelLoader",
+    "_meta": {
+      "title": "Load SAM3 Model"
+    }
+  },
+  "11": {
+    "inputs": {
+      "model": "Florence-2-base",
+      "precision": "fp16",
+      "convert_to_safetensors": "sdpa"
+    },
+    "class_type": "Florence2ModelLoader",
+    "_meta": {
+      "title": "Florence-2 (Optional Fallback)"
+    }
+  },
+  "15": {
+    "inputs": {
+      "part_labels": "face\nhair\ntorso\njacket\nskirt\ngreen sash\nunder shirt\nleft arm\nright arm\nleft hand\nright hand\nleft leg\nright leg\nleft foot\nright foot\nleft shin brace\nright shin brace",
+      "character_name": "Salena",
+      "output_directory": "split_parts_sam3",
+      "padding": 20,
+      "confidence_threshold": 0.3,
+      "occlusion_threshold": 0.15,
+      "mask_expand_pixels": 15,
+      "mask_blur": 1,
+      "enable_inpainting": true,
+      "output_mode": "solid_background",
+      "background_color": "#ffffff",
+      "mask_output_mode": "none",
+      "auto_lr_split_parts": "hands\nfeet\nlegs\narms",
+      "lr_convention": "anatomical",
+      "cluster_hair_front_back": true,
+      "passthrough_parts": "",
+      "write_metadata_sidecar": true,
+      "image": [
+        "1",
+        0
+      ],
+      "depth_map": [
+        "23",
+        0
+      ],
+      "sam3_model": [
+        "10",
+        0
+      ],
+      "florence2_model": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "AutoSplitOrchestratorSAM3",
+    "_meta": {
+      "title": "Auto-Split Orchestrator (SAM3)"
+    }
+  },
+  "16": {
+    "inputs": {
+      "images": [
+        "15",
+        1
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Split Parts Preview Grid"
+    }
+  },
+  "17": {
+    "inputs": {
+      "text": "Auto-Split Report (SAM3) for 'Salena'\n==================================================\nParts requested: 17\n\n  OK  'face' -- clear (score=0.896)\n  OK  'hair' -- clear (score=0.908)\n  OK  'torso' -- clear (score=0.702)\n  COMPLETE  'torso' -- bridged + filled occluded band\n  OK  'jacket' -- clear (score=0.866)\n  COMPLETE  'jacket' -- bridged + filled occluded band\n  OK  'skirt' -- clear (score=0.834)\n  OK  'green sash' -- clear (score=0.317)\n  OK  'under shirt' -- clear (score=0.311)\n  OK  'left arm' -- clear (score=0.794)\n  OK  'right arm' -- clear (score=0.917)\n  OK  'left hand' -- clear (score=0.872)\n  OK  'right hand' -- clear (score=0.903)\n  OK  'left leg' -- clear (score=0.688)\n  COMPLETE  'left leg' -- bridged + filled occluded band\n  OK  'right leg' -- clear (score=0.760)\n  COMPLETE  'right leg' -- bridged + filled occluded band\n  OK  'left foot' -- clear (score=0.852)\n  OK  'right foot' -- clear (score=0.796)\n  OK  'left shin brace' -- clear (score=0.585)\n  OK  'right shin brace' -- clear (score=0.377)\n\nZ-ORDER (front to back):\n   0. face (depth=0.952)\n   1. jacket (depth=0.951)\n   2. left arm (depth=0.901)\n   3. right arm (depth=0.962)\n   4. left hand (depth=0.914)\n   5. right hand (depth=0.956)\n   6. skirt (depth=0.978)\n   7. left leg (depth=0.916)\n   8. right leg (depth=0.958)\n   9. left foot (depth=0.851)\n  10. right foot (depth=0.927)\n  11. torso (depth=0.941)\n  12. hair (depth=0.952)\n  13. left shin brace (depth=0.913)\n  14. under shirt (depth=0.946)\n  15. right shin brace (depth=0.952)\n  16. green sash (depth=0.980)\n\n==================================================\nSUMMARY:\n  Saved: 17 parts\n  Inpainted: 0 parts\n  Skipped: 0 parts\n  Output: C:\\Users\\jeffr\\Desktop\\AI Work\\ComfyUI-Easy-Install\\ComfyUI\\output\\split_parts_sam3",
+      "anything": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "easy showAnything",
+    "_meta": {
+      "title": "Pipeline Report"
+    }
+  },
+  "22": {
+    "inputs": {
+      "model": "prs-eth/marigold-depth-lcm-v1-0"
+    },
+    "class_type": "MarigoldModelLoader",
+    "_meta": {
+      "title": "MarigoldModelLoader"
+    }
+  },
+  "23": {
+    "inputs": {
+      "seed": 123,
+      "denoise_steps": 4,
+      "ensemble_size": 3,
+      "processing_resolution": 768,
+      "scheduler": "LCMScheduler",
+      "use_taesd_vae": false,
+      "keep_model_loaded": false,
+      "marigold_model": [
+        "22",
+        0
+      ],
+      "image": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "MarigoldDepthEstimation_v2",
+    "_meta": {
+      "title": "MarigoldDepthEstimation_v2"
+    }
+  },
+  "24": {
+    "inputs": {
+      "crop_target": "head",
+      "scale_factor": 2,
+      "padding_pct": 0.25,
+      "confidence_threshold": 0.3,
+      "image": [
+        "1",
+        0
+      ],
+      "depth_map": [
+        "23",
+        0
+      ],
+      "sam3_model": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "HeadCropUpscale",
+    "_meta": {
+      "title": "Head Crop + Upscale (Facial Detail)"
+    }
+  },
+  "25": {
+    "inputs": {
+      "images": [
+        "24",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "26": {
+    "inputs": {
+      "part_labels": "left eye\nright eye\nleft iris\nright iris\nlips\nbottom lips\nnose\neyebrow",
+      "character_name": "Salena",
+      "output_directory": "split_parts_sam3_facial",
+      "padding": 20,
+      "confidence_threshold": 0.15,
+      "occlusion_threshold": 0.2,
+      "mask_expand_pixels": 15,
+      "mask_blur": 1,
+      "enable_inpainting": true,
+      "output_mode": "solid_background",
+      "background_color": "#FFFFFF",
+      "mask_output_mode": "none",
+      "auto_lr_split_parts": "eyebrow",
+      "lr_convention": "anatomical",
+      "cluster_hair_front_back": false,
+      "passthrough_parts": "nose\nlips\nbottom lips",
+      "write_metadata_sidecar": true,
+      "image": [
+        "24",
+        0
+      ],
+      "depth_map": [
+        "24",
+        1
+      ],
+      "sam3_model": [
+        "10",
+        0
+      ],
+      "florence2_model": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "AutoSplitOrchestratorSAM3",
+    "_meta": {
+      "title": "Auto-Split Orchestrator (SAM3)"
+    }
+  },
+  "27": {
+    "inputs": {
+      "images": [
+        "26",
+        1
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "28": {
+    "inputs": {
+      "text": "Auto-Split Report (SAM3) for 'Salena'\n==================================================\nParts requested: 8\n\n  OK  'left eye' -- clear (score=0.846)\n  OK  'right eye' -- clear (score=0.744)\n  OK  'left iris' -- clear (score=0.582)\n  OK  'right iris' -- clear (score=0.509)\n  OK  'lips' -- clear (score=0.727)\n  OK  'bottom lips' -- clear (score=0.388)\n  OK  'nose' -- clear (score=0.746)\n  OK  'eyebrow_left' -- clear (score=0.845)\n  OK  'eyebrow_right' -- clear (score=0.845)\n\nZ-ORDER (front to back):\n   0. nose (depth=0.940)\n   1. left eye (depth=0.929)\n   2. right eye (depth=0.957)\n   3. bottom lips (depth=0.925)\n   4. lips (depth=0.931)\n   5. eyebrow_left (depth=0.933)\n   6. left iris (depth=0.956)\n   7. right iris (depth=0.956)\n   8. eyebrow_right (depth=0.960)\n\n==================================================\nSUMMARY:\n  Saved: 9 parts\n  Inpainted: 0 parts\n  Skipped: 0 parts\n  Output: C:\\Users\\jeffr\\Desktop\\AI Work\\ComfyUI-Easy-Install\\ComfyUI\\output\\split_parts_sam3_facial",
+      "anything": [
+        "26",
+        0
+      ]
+    },
+    "class_type": "easy showAnything",
+    "_meta": {
+      "title": "Show Any"
+    }
+  }
+}
