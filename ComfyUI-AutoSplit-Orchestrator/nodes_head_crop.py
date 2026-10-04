@@ -65,10 +65,20 @@ class HeadCropUpscale:
                     "tooltip": "SAM3 confidence threshold for detecting the crop target region."
                 }),
             },
+            "optional": {
+                "run_id": ("STRING", {
+                    "default": "",
+                    "tooltip": "When set with output_directory, the transform is also written to <output_directory>/<run_id>/head_crop_transform.json."
+                }),
+                "output_directory": ("STRING", {
+                    "default": "",
+                    "tooltip": "Usually the facial orchestrator's output_directory."
+                }),
+            },
         }
 
-    RETURN_TYPES = ("IMAGE", "IMAGE",)
-    RETURN_NAMES = ("cropped_image", "cropped_depth",)
+    RETURN_TYPES = ("IMAGE", "IMAGE", "STRING",)
+    RETURN_NAMES = ("cropped_image", "cropped_depth", "transform",)
     FUNCTION = "crop_and_upscale"
     CATEGORY = "2D Character Split"
 
@@ -97,18 +107,21 @@ class HeadCropUpscale:
 
         best_mask = None
         best_score = 0.0
+        try:
+            state = processor.set_image(pil_img)   # encode once for all prompts
+        except Exception as e:
+            print("[HeadCrop] set_image failed: %s" % e)
+            return None, 0.0
 
         for prompt_text in variations:
             try:
                 print("[HeadCrop] Trying prompt: '%s'" % prompt_text)
-                state = processor.set_image(pil_img)
                 processor.reset_all_prompts(state)
-                processor.set_confidence_threshold(confidence, state)
+                processor.set_confidence_threshold(confidence)
                 state = processor.set_text_prompt(prompt_text, state)
 
                 masks = state.get('masks')
-                logits = state.get('masks_logits')
-
+                scores = state.get('scores')
                 if masks is None or (hasattr(masks, 'numel') and masks.numel() == 0):
                     print("[HeadCrop] No masks for '%s'" % prompt_text)
                     continue
@@ -117,16 +130,9 @@ class HeadCropUpscale:
                 if masks_f.ndim == 4:
                     masks_f = masks_f.squeeze(1)
 
-                scores = None
-                if logits is not None:
-                    logits_f = logits.float()
-                    if logits_f.ndim == 4:
-                        logits_f = logits_f.squeeze(1)
-                    scores = logits_f.mean(dim=(-2, -1))
-
                 for i in range(masks_f.shape[0]):
                     m = masks_f[i]
-                    score = scores[i].item() if scores is not None else 1.0
+                    score = float(scores[i].item()) if scores is not None else 1.0
                     m_np = m.squeeze().cpu().numpy()
                     m_binary = (m_np > 0.5).astype(np.float32)
                     nonzero = m_binary.sum()
@@ -156,26 +162,39 @@ class HeadCropUpscale:
 
         return best_mask, best_score
 
-    def _write_transform(self, x_min, y_min, scale):
+    def _write_transform(self, x_min, y_min, scale, width=None, height=None,
+                         run_id="", output_directory=""):
         """Record the crop offset + upscale factor so downstream tools can map
         facial-pass part coordinates back to the full image:
-            full_x = x_min + facial_x / scale  (and the part is downscaled by 1/scale)."""
+            full_x = x_min + facial_x / scale  (and the part is downscaled by 1/scale).
+        Returns the transform as a JSON string (the node's 'transform' output).
+        The legacy global output/head_crop_transform.json is still written for
+        older drivers; with run_id + output_directory a per-run copy is written
+        too, so runs never read each other's transform."""
+        import os
+        import json
+        t = {"x_min": int(x_min), "y_min": int(y_min), "scale": float(scale)}
+        if width and height:
+            t["crop_size"] = [int(width), int(height)]
         try:
-            import os
-            import json
             import folder_paths
             out = folder_paths.get_output_directory()
-            path = os.path.join(out, "head_crop_transform.json")
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"x_min": int(x_min), "y_min": int(y_min),
-                           "scale": float(scale)}, f)
-            print("[HeadCrop] transform sidecar -> x=%d y=%d scale=%.2f"
-                  % (int(x_min), int(y_min), float(scale)))
+            paths = [os.path.join(out, "head_crop_transform.json")]
+            if run_id and output_directory:
+                d = os.path.join(out, output_directory, run_id)
+                os.makedirs(d, exist_ok=True)
+                paths.append(os.path.join(d, "head_crop_transform.json"))
+            for path in paths:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(t, f)
+            print("[HeadCrop] transform -> x=%d y=%d scale=%.2f" % (t["x_min"], t["y_min"], t["scale"]))
         except Exception as e:
             print("[HeadCrop] could not write transform sidecar: %s" % e)
+        return json.dumps(t)
 
     def crop_and_upscale(self, image, depth_map, sam3_model, crop_target="head",
-                         scale_factor=2.0, padding_pct=0.25, confidence_threshold=0.30):
+                         scale_factor=2.0, padding_pct=0.25, confidence_threshold=0.30,
+                         run_id="", output_directory=""):
         """
         Main entry point:
         1. Detect target region via SAM3
@@ -194,8 +213,8 @@ class HeadCropUpscale:
         if mask is None:
             print("[HeadCrop] WARNING: Could not detect '%s' — returning full image unchanged" % crop_target)
             print("[HeadCrop] The facial detail orchestrator will run on the full image.")
-            self._write_transform(0, 0, 1.0)
-            return (image, depth_map)
+            t = self._write_transform(0, 0, 1.0, W, H, run_id, output_directory)
+            return (image, depth_map, t)
 
         print("[HeadCrop] ACCEPTED '%s' (score=%.3f)" % (crop_target, score))
 
@@ -261,9 +280,11 @@ class HeadCropUpscale:
         print("[HeadCrop] Done — output image: %dx%d" % (img_scaled.shape[2], img_scaled.shape[1]))
         print("=" * 60)
 
-        eff_scale = scale_factor if scale_factor > 1.0 else 1.0
-        self._write_transform(x_min, y_min, eff_scale)
-        return (img_scaled, depth_scaled)
+        # exact scale actually applied (int() rounding above)
+        eff_scale = (img_scaled.shape[2] / float(final_w)) if scale_factor > 1.0 else 1.0
+        t = self._write_transform(x_min, y_min, eff_scale, final_w, final_h,
+                                  run_id, output_directory)
+        return (img_scaled, depth_scaled, t)
 
 
 NODE_CLASS_MAPPINGS = {
