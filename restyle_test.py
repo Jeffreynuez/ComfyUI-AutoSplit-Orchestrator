@@ -96,9 +96,9 @@ def build_graph(ckpt, image_ref, prompt, seed):
         "12": {"class_type": "CLIPSetLastLayer",
                "inputs": {"clip": ["4", 1], "stop_at_clip_layer": CLIP_SKIP}},
         "10": {"class_type": "LoadImage", "inputs": {"image": image_ref}},
-        "11": {"class_type": "ImageScale", "inputs": {
+        "11": {"class_type": "ImageScaleToTotalPixels", "inputs": {
             "image": ["10", 0], "upscale_method": "lanczos",
-            "width": SIZE, "height": SIZE, "crop": "disabled"}},
+            "megapixels": round((SIZE * SIZE) / 1e6, 2), "resolution_steps": 8}},
         "5": {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["4", 2]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["12", 0]}},
         "7": {"class_type": "CLIPTextEncode", "inputs": {"text": NEG, "clip": ["12", 0]}},

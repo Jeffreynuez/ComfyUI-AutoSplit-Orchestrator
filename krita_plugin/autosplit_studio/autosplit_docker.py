@@ -27,12 +27,29 @@ from . import restyle
 # Set AUTOSPLIT_PROJECT to this repo's folder and AUTOSPLIT_COMFY_ROOT to your
 # ComfyUI install; everything else is derived. Or override any single value
 # with its own environment variable. Nothing here is machine-specific.
+# realpath, not abspath: tools/link_dev_install.cmd puts this plugin in pykrita
+# as a junction, and realpath follows it back to the repo, so the plugin finds
+# the workflow and spine_export/ without AUTOSPLIT_PROJECT being set.
 PROJECT_DIR = os.environ.get(
     "AUTOSPLIT_PROJECT",
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-COMFY_ROOT = os.environ.get(
-    "AUTOSPLIT_COMFY_ROOT",
-    os.path.join(os.path.dirname(PROJECT_DIR), "ComfyUI-Easy-Install", "ComfyUI"))
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
+
+
+def _find_comfy_root():
+    """AUTOSPLIT_COMFY_ROOT, else the usual Easy-Install locations next to the
+    project (C:\\dev\\AI Work\\ComfyUI-Easy-Install\\ComfyUI on Jeffrey's PC)."""
+    env = os.environ.get("AUTOSPLIT_COMFY_ROOT")
+    if env:
+        return env
+    base = os.path.dirname(PROJECT_DIR)
+    for cand in (os.path.join(base, "AI Work", "ComfyUI-Easy-Install", "ComfyUI"),
+                 os.path.join(base, "ComfyUI-Easy-Install", "ComfyUI")):
+        if os.path.isdir(cand):
+            return cand
+    return os.path.join(base, "AI Work", "ComfyUI-Easy-Install", "ComfyUI")
+
+
+COMFY_ROOT = _find_comfy_root()
 
 COMFY_URL = os.environ.get("AUTOSPLIT_COMFY_URL", "http://127.0.0.1:8188")
 WORKFLOW_API = os.environ.get(
@@ -50,7 +67,7 @@ SPINE_VERSION = "4.3.22"
 class SplitWorker(QThread):
     """Runs the ComfyUI split off the UI thread so Krita doesn't freeze."""
     progress = pyqtSignal(str)
-    done = pyqtSignal()
+    done = pyqtSignal(object)   # run_split's result: run_id + pass folders
     failed = pyqtSignal(str)
 
     def __init__(self, comfy_url, workflow_api, image_path):
@@ -61,9 +78,9 @@ class SplitWorker(QThread):
 
     def run(self):
         try:
-            comfy_client.run_split(self._url, self._wf, self._img,
-                                   progress=lambda m: self.progress.emit(str(m)))
-            self.done.emit()
+            result = comfy_client.run_split(self._url, self._wf, self._img,
+                                            progress=lambda m: self.progress.emit(str(m)))
+            self.done.emit(result)
         except Exception as e:
             self.failed.emit("%s\n%s" % (e, traceback.format_exc()))
 
@@ -96,6 +113,7 @@ class AutoSplitDocker(DockWidget):
         self.setWindowTitle("AutoSplit Studio")
         self._worker = None
         self._restyle_worker = None
+        self._last_run = None   # run_split result of the most recent split
 
         root = QWidget()
         layout = QVBoxLayout()
@@ -140,15 +158,32 @@ class AutoSplitDocker(DockWidget):
             self.say("Workflow not found:\n  %s" % WORKFLOW_API)
             return
         try:
-            comfy_client.ping(COMFY_URL)
-        except Exception:
-            self.say("Can't reach ComfyUI at %s - is it running on port 8188?" % COMFY_URL)
+            comfy_client.check_server(COMFY_URL)
+        except Exception as e:
+            self.say("Can't use ComfyUI at %s:\n  %s" % (COMFY_URL, e))
             return
 
         tmp = os.path.join(tempfile.gettempdir(), "autosplit_input.png")
         self.say("exporting active document (%dx%d)..." % (doc.width(), doc.height()))
+        # don't feed an earlier split's layers back in: hide them for the export
+        hidden = []
+        for node in doc.rootNode().childNodes():
+            if node.name() == "character_parts" and node.visible():
+                node.setVisible(False)
+                hidden.append(node)
+        if hidden:
+            doc.refreshProjection()
+            self.say("(hid %d earlier character_parts group(s) for the export)" % len(hidden))
         doc.setBatchmode(True)
-        if not doc.exportImage(tmp, InfoObject()) or not os.path.exists(tmp):
+        try:
+            ok = doc.exportImage(tmp, InfoObject())
+        finally:
+            doc.setBatchmode(False)
+            for node in hidden:  # put the earlier groups back as they were
+                node.setVisible(True)
+            if hidden:
+                doc.refreshProjection()
+        if not ok or not os.path.exists(tmp):
             self.say("Failed to export the active document to PNG.")
             return
 
@@ -164,19 +199,21 @@ class AutoSplitDocker(DockWidget):
         self.say("ERROR: " + msg)
         self._set_busy(False)
 
-    def _on_split_done(self):
+    def _on_split_done(self, result):
         try:
             doc = Krita.instance().activeDocument()
-            entries = comfy_client.read_parts(COMFY_OUTPUT_DIR, PART_SUBDIRS)
+            self._last_run = result
+            entries = comfy_client.read_parts(COMFY_OUTPUT_DIR, passes=result.get("passes"))
             if not entries:
-                self.say("Split finished but no part metadata was found.")
+                self.say("Split finished but no part metadata was found for run %s."
+                         % result.get("run_id"))
                 return
-            transform = comfy_client.read_head_transform(COMFY_OUTPUT_DIR)
-            if transform.get("scale", 1.0) != 1.0:
-                self.say("facial transform: offset (%d,%d), scale %.2f"
-                         % (transform["x_min"], transform["y_min"], transform["scale"]))
-            self.say("importing %d parts as layers..." % len(entries))
-            created = self._import_parts(doc, entries, transform)
+            for p in entries:
+                for flag in p.get("flags") or []:
+                    if flag in ("lr_overlap", "pair_partner_missing", "low_confidence"):
+                        self.say("  check '%s': %s" % (p.get("tag"), flag.replace("_", " ")))
+            self.say("importing %d parts as layers (run %s)..." % (len(entries), result.get("run_id")))
+            created = self._import_parts(doc, entries)
             doc.refreshProjection()
             self.say("done - created %d layers." % created)
             self.info.setText("Created %d part layers." % created)
@@ -187,61 +224,44 @@ class AutoSplitDocker(DockWidget):
             self._set_busy(False)
 
     # --------------------------- layer import ---------------------------
-    def _import_parts(self, doc, entries, transform):
-        def zkey(p):
-            try:
-                return float(p.get("z_order", p.get("z_rank", 0)))
-            except Exception:
-                return 0.0
-
-        body = sorted([e for e in entries if not e.get("_facial")], key=zkey, reverse=True)
-        facial = sorted([e for e in entries if e.get("_facial")], key=zkey, reverse=True)
-
-        sc = transform.get("scale", 1.0) or 1.0
-        ox = transform.get("x_min", 0)
-        oy = transform.get("y_min", 0)
-
+    def _import_parts(self, doc, entries):
+        """Add each part as a paint layer, back-most first, inside a
+        character_parts group. Facial parts go in a 'face' subgroup placed
+        directly above the face layer (not above everything), so bangs that the
+        split put in front of the face still cover the eyebrows."""
+        order = comfy_client.draw_order(entries)
         root = doc.rootNode()
         main_group = doc.createGroupLayer("character_parts")
         root.addChildNode(main_group, None)
 
         created = 0
-        for p in body:
-            if self._add_part(doc, main_group, p, sc, ox, oy):
+        face_group = None
+        for p in order:
+            if p.get("_facial"):
+                if face_group is None:
+                    face_group = doc.createGroupLayer("face")
+                    main_group.addChildNode(face_group, None)
+                target = face_group
+            else:
+                target = main_group
+            if self._add_part(doc, target, p):
                 created += 1
-
-        if facial:
-            face_group = doc.createGroupLayer("face")
-            main_group.addChildNode(face_group, None)  # on top of the body parts
-            for p in facial:
-                if self._add_part(doc, face_group, p, sc, ox, oy):
-                    created += 1
         return created
 
-    def _add_part(self, doc, parent, p, sc, ox, oy):
+    def _add_part(self, doc, parent, p):
         try:
             path = p.get("_path")
             tag = str(p.get("tag", "part")).replace("/", "_")
-            xyxy = p.get("xyxy") or [0, 0, 0, 0]
-
             img = QImage(path)
             if img.isNull():
                 self.say("  skip '%s' (could not load %s)" % (tag, os.path.basename(path)))
                 return False
             img = img.convertToFormat(QImage.Format_ARGB32)
+            x0, y0, w, h, sc = comfy_client.placement(p)
+            if (img.width(), img.height()) != (w, h) and w > 0 and h > 0:
+                img = img.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+                img = img.convertToFormat(QImage.Format_ARGB32)
             w, h = img.width(), img.height()
-
-            if p.get("_facial"):
-                if sc and sc != 1.0:
-                    nw = max(1, int(round(w / sc)))
-                    nh = max(1, int(round(h / sc)))
-                    img = img.scaled(nw, nh, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-                    img = img.convertToFormat(QImage.Format_ARGB32)
-                    w, h = img.width(), img.height()
-                x0 = int(ox + xyxy[0] / sc)
-                y0 = int(oy + xyxy[1] / sc)
-            else:
-                x0, y0 = int(xyxy[0]), int(xyxy[1])
 
             ptr = img.bits()
             try:
@@ -266,14 +286,18 @@ class AutoSplitDocker(DockWidget):
             doc = Krita.instance().activeDocument()
             fn = doc.fileName() if doc else ""
             character = os.path.splitext(os.path.basename(fn))[0] if fn else "character"
-            entries = comfy_client.read_parts(COMFY_OUTPUT_DIR, PART_SUBDIRS)
+            if self._last_run:
+                entries = comfy_client.read_parts(COMFY_OUTPUT_DIR, passes=self._last_run.get("passes"))
+            else:  # nothing split in this Krita session: fall back to the legacy folders
+                entries = comfy_client.read_parts(COMFY_OUTPUT_DIR, PART_SUBDIRS)
+                if entries:
+                    self.say("(no split in this session - using the last parts on disk)")
             if not entries:
                 self.say("No split parts found - run Split Character first.")
                 return
-            transform = comfy_client.read_head_transform(COMFY_OUTPUT_DIR)
             self.say("exporting %d parts to Spine as '%s'..." % (len(entries), character))
             json_path = spine_export.export_to_spine(
-                entries, transform, SPINE_OUT_DIR, character, SPINE_VERSION, progress=self.say)
+                entries, SPINE_OUT_DIR, character, SPINE_VERSION, progress=self.say)
             self.say("done. In Spine: File -> Import Data -> %s" % os.path.basename(json_path))
             self.info.setText("Spine project written to:\n%s" % SPINE_OUT_DIR)
         except Exception as e:
@@ -297,7 +321,11 @@ class AutoSplitDocker(DockWidget):
         tmp = os.path.join(tempfile.gettempdir(), "restyle_input.png")
         self.say("exporting character for restyle...")
         doc.setBatchmode(True)
-        if not doc.exportImage(tmp, InfoObject()) or not os.path.exists(tmp):
+        try:
+            ok = doc.exportImage(tmp, InfoObject())
+        finally:
+            doc.setBatchmode(False)
+        if not ok or not os.path.exists(tmp):
             self.say("Failed to export the document to PNG.")
             return
         prompt = self.prompt_edit.text()
