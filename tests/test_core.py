@@ -11,7 +11,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "ComfyUI-AutoSplit-Orchestrator"))
-from autosplit_core import drawing, masks, ordering, sides  # noqa: E402
+from autosplit_core import drawing, masks, ordering, ownership, sides  # noqa: E402
 
 
 def rect(h, w, y0, y1, x0, x1):
@@ -129,6 +129,39 @@ def test_merge_puts_facial_parts_in_front_of_face_only():
 def test_merge_without_anchor_goes_on_top():
     merged = [e["tag"] for e in drawing.merge([{"tag": "torso"}], [{"tag": "nose"}])]
     assert merged == ["torso", "nose"]
+
+
+# ------------------------------------------------------------ ownership --
+def test_owner_map_gives_each_pixel_to_the_front_most_part():
+    jacket = rect(100, 100, 20, 80, 10, 90)        # SAM 3 jacket includes the sleeve
+    sleeve = rect(100, 100, 20, 80, 70, 90)        # drawn in front of the jacket
+    vis = ownership.visible([("jacket", jacket), ("sleeve", sleeve)])
+    assert not (vis["jacket"] & vis["sleeve"]).any()
+    assert vis["sleeve"].sum() == sleeve.sum()
+    assert vis["jacket"].sum() == jacket.sum() - sleeve.sum()
+
+
+def test_nested_sub_part_keeps_its_pixels_whatever_the_order():
+    jacket = rect(100, 100, 20, 80, 10, 90)        # swallowed the far sleeve
+    far_sleeve = rect(100, 100, 30, 80, 75, 88)    # drawn BEHIND the jacket
+    vis = ownership.visible([("far sleeve", far_sleeve), ("jacket", jacket)])
+    assert vis["far sleeve"].sum() == far_sleeve.sum()
+    assert not (vis["jacket"] & far_sleeve).any()
+    # the jacket is drawn in front, so it must not be filled over the sleeve
+    region, front = ownership.hidden_candidates([("far sleeve", far_sleeve), ("jacket", jacket)],
+                                                "jacket", expand=0.2)
+    assert front == [] and not region.any()
+
+
+def test_hidden_candidates_are_front_parts_near_the_part():
+    torso = rect(200, 200, 40, 70, 80, 120)        # only the neck shows
+    shirt = rect(200, 200, 70, 150, 60, 140)       # in front, right below it
+    far = rect(200, 200, 180, 199, 0, 20)          # in front, but far away
+    btf = [("torso", torso), ("shirt", shirt), ("far", far)]
+    region, front = ownership.hidden_candidates(btf, "torso", expand=1.0)
+    assert front == ["shirt"]
+    assert region[90, 100] and not region[190, 10] and not region[50, 100]
+    assert abs(ownership.hidden_share(btf, "torso")) < 1e-9
 
 
 if __name__ == "__main__":
