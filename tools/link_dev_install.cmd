@@ -12,10 +12,14 @@ rem
 rem    tools\link_dev_install.cmd           link (close ComfyUI and Krita first)
 rem    tools\link_dev_install.cmd unlink    remove the junctions only
 rem
+rem  The window waits for a key at the end so a double-click shows the result.
+rem  Set AUTOSPLIT_NOPAUSE=1 to skip that when running it from a script.
+rem
 rem  ComfyUI root: AUTOSPLIT_COMFY_ROOT if set, else the Easy-Install layout
 rem  beside the repo: <repo>\..\AI Work\ComfyUI-Easy-Install\ComfyUI
 rem ---------------------------------------------------------------------------
 setlocal EnableExtensions
+set "RC=0"
 
 for %%I in ("%~dp0..") do set "REPO=%%~fI"
 if defined AUTOSPLIT_COMFY_ROOT (
@@ -43,27 +47,32 @@ if /I "%~1"=="unlink" goto :unlink
 
 if not exist "%NODE_SRC%\nodes_sam3.py" (
   echo  ERROR: "%NODE_SRC%" does not look like the node package. Run this from the repo's tools folder.
-  exit /b 1
+  goto :fail
 )
 if not exist "%COMFY%\custom_nodes\" (
   echo  ERROR: no custom_nodes folder in "%COMFY%". Set AUTOSPLIT_COMFY_ROOT to your ComfyUI folder.
-  exit /b 1
+  goto :fail
 )
 
-call :link "%NODE_SRC%" "%NODE_DST%" "custom_nodes-ComfyUI-AutoSplit-Orchestrator" || exit /b 1
+call :link "%NODE_SRC%" "%NODE_DST%" "custom_nodes-ComfyUI-AutoSplit-Orchestrator" || goto :fail
 
 if exist "%PYKRITA%\" (
-  call :link "%KRITA_SRC%" "%KRITA_DST%" "pykrita-autosplit_studio" || exit /b 1
+  call :link "%KRITA_SRC%" "%KRITA_DST%" "pykrita-autosplit_studio" || goto :fail
   copy /Y "%REPO%\krita_plugin\autosplit_studio.desktop" "%PYKRITA%\" >nul
   echo   copied autosplit_studio.desktop into pykrita
 ) else (
   echo   skip Krita: "%PYKRITA%" not found ^(start Krita once, or ignore if you do not use the plugin^)
 )
 
+if not exist "%NODE_DST%\nodes_sam3.py" (
+  echo   ERROR: the link was made but "%NODE_DST%\nodes_sam3.py" cannot be read through it.
+  goto :fail
+)
+
 echo.
 echo  Done. Restart ComfyUI and Krita so they load the linked code.
 if exist "%BK%\" echo  Old copies are in "%BK%". Delete that folder once you are happy.
-exit /b 0
+goto :done
 
 :unlink
 call :drop "%NODE_DST%"
@@ -71,7 +80,17 @@ call :drop "%KRITA_DST%"
 echo.
 echo  Junctions removed. Your earlier copies, if any, are under
 for %%I in ("%COMFY%\..") do echo  "%%~fI\autosplit_link_backup"
-exit /b 0
+goto :done
+
+:fail
+set "RC=1"
+echo.
+echo  Stopped. Nothing after the error above was changed.
+
+:done
+echo.
+if not defined AUTOSPLIT_NOPAUSE pause
+exit /b %RC%
 
 rem ---- :link SRC DST LABEL --------------------------------------------------
 :link
