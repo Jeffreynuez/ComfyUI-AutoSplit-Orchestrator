@@ -53,6 +53,21 @@ class Part:
         m[ya:yb, xa:xb] = a[ya - self.y0:yb - self.y0, xa - self.x0:xb - self.x0]
         return m
 
+    def paint_onto(self, canvas_rgb, canvas_mask, thresh=128):
+        """Write this part's colour into a full-canvas HxWx3 array where its
+        alpha >= thresh (later calls paint over earlier ones)."""
+        H, W = canvas_mask.shape
+        a = self.alpha >= thresh
+        h, w = a.shape
+        xa, ya = max(0, self.x0), max(0, self.y0)
+        xb, yb = min(W, self.x0 + w), min(H, self.y0 + h)
+        if xb <= xa or yb <= ya:
+            return
+        sub = a[ya - self.y0:yb - self.y0, xa - self.x0:xb - self.x0]
+        rgb = self.rgba[ya - self.y0:yb - self.y0, xa - self.x0:xb - self.x0, :3]
+        canvas_rgb[ya:yb, xa:xb][sub] = rgb[sub]
+        canvas_mask[ya:yb, xa:xb] |= sub
+
 
 def _read_transform(meta, folder):
     t = meta.get("crop_transform")
@@ -166,6 +181,16 @@ class GroundTruth:
             m[y0:y0 + h, x0:x0 + w] = a[: self.H - y0, : self.W - x0]
             self._alpha[key] = m
         return self._alpha[key]
+
+    def paint_layer(self, layer, canvas_rgb, thresh=128):
+        """Write a layer's own colour (hidden areas included) into a
+        full-canvas HxWx3 array where its alpha >= thresh."""
+        im = np.asarray(Image.open(os.path.join(self.folder, layer["file"])).convert("RGBA"))
+        x0, y0 = layer["bbox"][:2]
+        h, w = im.shape[:2]
+        h, w = min(h, self.H - y0), min(w, self.W - x0)
+        sub = im[:h, :w, 3] >= thresh
+        canvas_rgb[y0:y0 + h, x0:x0 + w][sub] = im[:h, :w, :3][sub]
 
     def top_index_map(self):
         """Per pixel: draw index of the front-most solid (non-overlay) layer,

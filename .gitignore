@@ -66,3 +66,6 @@ ComfyUI-AutoSplit-Orchestrator/PROJECT_INSTRUCTIONS.md
 *.backup-*
 __wtest*
 __bash_write_test*
+
+# ---- Hand-cut reference layers (same artwork as the PSD ground truth; kept local) ----
+Reference/

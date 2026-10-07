@@ -1,0 +1,47 @@
+{
+  "_about": "Hidden-area fill recipe that scored Rig Match 0.624 on Salena FA (6 Oct 2026, run p2_body/v5d). Each peel is a Flux.2 Klein edit of the flat picture (tools/klein_workflows.py full, 1.5 MP, 4 steps, seed 7), upscaled back to the picture's size, then split with the SAM 3 orchestrator using `sam_labels`. `parts` says which peeled tags fill which part of the original split (tools/peel_merge.py plan format). Picture paths are ComfyUI input/output names. Prompts describe the character, so they are per-character for now.",
+  "source": "composite_flat.png",
+  "keep_suffix": " Keep everything else exactly the same: the same pose, position, size, proportions, colours, line style and flat cartoon shading, and the same plain grey background.",
+  "peels": [
+    {
+      "name": "e1_basebody_4b", "model": "4b",
+      "prompt": "Edit this 2D character illustration. Remove her brown jacket, her cream crop top, her green skirt with the light green sash, and her brown leg warmers, so that her plain base body is visible: she wears only a simple light green sports bra and simple light green briefs. Keep exactly the same pose, position, size, proportions, face, hair, skin tone, line style and flat cartoon shading. Plain white background.",
+      "sam_labels": ["torso", "left leg", "right leg", "left hand", "right hand", "left foot", "right foot", "sports bra", "neck", "underwear", "bikini bottom"],
+      "parts": {"torso": ["torso", "sports bra", "neck", "underwear", "bikini bottom"],
+                "left leg": ["left leg"], "right leg": ["right leg"], "left hand": ["left hand"],
+                "right hand": ["right hand"], "left foot": ["left foot"], "right foot": ["right foot"]},
+      "anchors": ["left leg", "right leg", "left hand", "right hand", "left foot", "right foot", "torso", "face"],
+      "colour": "global",
+      "note": "Arms are NOT taken from the base body: the rig's arm group is the jacket sleeve, so bare-arm paint is the wrong colour there."
+    },
+    {
+      "name": "e2_shirt", "model": "4b",
+      "prompt": "Remove her brown jacket and the strands of green hair that fall in front of her body, so that her cream crop top is fully visible and complete.{keep}",
+      "sam_labels": ["under shirt", "crop top"],
+      "parts": {"under shirt": ["under shirt", "crop top"]}
+    },
+    {
+      "name": "e3_skirt", "model": "4b",
+      "prompt": "Remove the light green sash that is tied over her skirt and remove her hands, so that the whole green skirt is visible and complete.{keep}",
+      "sam_labels": ["skirt"],
+      "parts": {"skirt": ["skirt"]}
+    },
+    {
+      "name": "e4c_jacket_9b", "model": "9b",
+      "prompt": "Remove both of her arms completely, from the shoulders down, together with the jacket sleeves, cuffs and hands, as if she had no arms. Show the brown jacket's body as a sleeveless vest so the whole front and both sides of the jacket are visible and complete.{keep}",
+      "sam_labels": ["jacket", "vest"],
+      "parts": {"jacket": ["jacket", "vest"]},
+      "note": "4B ignored the arm removal (kept the sleeves, or lengthened the vest); 9B followed it."
+    },
+    {
+      "name": "e6_face", "model": "4b",
+      "prompt": "Remove all of her green hair, so that her whole head is visible: the face, the forehead up to the top of the skull, both ears and the neck.{keep}",
+      "sam_labels": ["head", "face", "left ear", "right ear"],
+      "parts": {"face": ["head", "face", "right ear"]}
+    }
+  ],
+  "rules": [
+    {"hull": {"tag": "hair_back", "group": ["hair_back", "hair_front"], "mode": "convex", "colour": "shadow"},
+     "note": "Generated back hair came out far too long (and 9B even longer), so the back hair is filled inside the convex outline of all the hair, behind the head, with the darkest visible back-hair colour."}
+  ]
+}
