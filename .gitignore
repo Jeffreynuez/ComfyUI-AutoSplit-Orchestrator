@@ -1,5 +1,6 @@
 # ---- Python ----
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *.egg-info/
 .venv/
@@ -24,9 +25,9 @@ temp/
 output/
 
 # ---- Generated run output ----
-# spine_export/ is committed on purpose as a worked example.
-# Uncomment the next line if you'd rather keep runs out of git.
-# spine_export/
+# spine_export/ is where the Krita plugin and spine_export.py write by default.
+# The committed worked example lives in examples/salena/ instead.
+spine_export/
 split_parts_sam3/
 split_parts_sam3_facial/
 *_run/
@@ -61,6 +62,7 @@ ComfyUI-AutoSplit-Orchestrator/__bash_write_test.txt
 ComfyUI-AutoSplit-Orchestrator/__wtest.txt
 ComfyUI-AutoSplit-Orchestrator/*.backup-*.py
 ComfyUI-AutoSplit-Orchestrator/CLAUDE_PROJECT_SETUP.md
+ComfyUI-AutoSplit-Orchestrator/PROJECT_INSTRUCTIONS.md
 *.backup-*
 __wtest*
 __bash_write_test*

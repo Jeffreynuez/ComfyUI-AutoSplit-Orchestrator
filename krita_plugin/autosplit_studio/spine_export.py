@@ -1,9 +1,18 @@
 """
 Spine export for the AutoSplit Studio Krita plugin.
 
-Same validated logic as the standalone spine_export.py, but uses Krita's bundled
-QImage for facial downscaling (no Pillow needed). Builds a Spine 4.3.22 project
-from the SAM3 split output: images/ + <character>.json.
+Builds a Spine 4.3.22 project (images/ + <character>.json) from one split run,
+using Krita's bundled QImage (no Pillow needed). Geometry and draw order come
+from comfy_client, the same code the layer import uses, so Krita and Spine
+always agree:
+
+  * position: comfy_client.placement (facial parts mapped back from the head
+    crop and shrunk to full-image size);
+  * draw order: comfy_client.draw_order (facial parts directly in front of the
+    face, not on top of every body part).
+
+Still one root bone and one region attachment per part; a starter skeleton is
+Phase 3.
 """
 import json
 import os
@@ -12,43 +21,25 @@ import shutil
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage
 
+from . import comfy_client
+
 
 def _san(tag):
     return str(tag).strip().lower().replace(" ", "_").replace("/", "_")
 
 
-def _geometry(entries, transform):
-    """Map split parts into full-image geometry and back-to-front draw order
-    (body back-to-front, then facial features on top)."""
-    sc = transform.get("scale", 1.0) or 1.0
-    ox = transform.get("x_min", 0)
-    oy = transform.get("y_min", 0)
-    body, facial = [], []
-    for e in entries:
-        xyxy = e.get("xyxy") or [0, 0, 0, 0]
-        src = e.get("_path")
-        img = QImage(src)
-        pw, ph = img.width(), img.height()
-        is_facial = bool(e.get("_facial"))
-        if is_facial and sc != 1.0:
-            w, h, x, y = pw / sc, ph / sc, ox + xyxy[0] / sc, oy + xyxy[1] / sc
-        elif is_facial:
-            w, h, x, y = pw, ph, ox + xyxy[0], oy + xyxy[1]
-        else:
-            w, h, x, y = pw, ph, xyxy[0], xyxy[1]
-        rec = {
-            "tag": _san(e.get("tag", "part")), "src": src, "facial": is_facial,
-            "x": float(x), "y": float(y), "w": float(w), "h": float(h),
-            "z": e.get("z_order", e.get("z_rank", 0)),
-        }
-        (facial if is_facial else body).append(rec)
-    body.sort(key=lambda p: -p["z"])
-    facial.sort(key=lambda p: -p["z"])
-    return body + facial, sc
+def _geometry(entries):
+    """Full-image boxes in back-to-front draw order."""
+    out = []
+    for e in comfy_client.draw_order(entries):
+        x, y, w, h, sc = comfy_client.placement(e)
+        out.append({"tag": _san(e.get("tag", "part")), "src": e.get("_path"),
+                    "x": float(x), "y": float(y), "w": float(w), "h": float(h),
+                    "resize": bool(e.get("_facial")) and sc != 1.0})
+    return out
 
 
-def export_to_spine(entries, transform, out_dir, character,
-                    spine_version="4.3.22", progress=None):
+def export_to_spine(entries, out_dir, character, spine_version="4.3.22", progress=None):
     """Write a Spine project (images/ + <character>.json) and return the JSON path."""
     def say(m):
         if progress:
@@ -57,7 +48,15 @@ def export_to_spine(entries, transform, out_dir, character,
     if not entries:
         raise RuntimeError("No parts to export - run a split first.")
 
-    parts, sc = _geometry(entries, transform)
+    parts = _geometry(entries)
+    seen = {}
+    for p in parts:  # Spine needs unique slot names
+        n = p["tag"]
+        if n in seen:
+            seen[n] += 1
+            p["tag"] = "%s_%d" % (n, seen[n])
+        else:
+            seen[n] = 1
 
     minx = min(p["x"] for p in parts)
     maxx = max(p["x"] + p["w"] for p in parts)
@@ -73,7 +72,7 @@ def export_to_spine(entries, transform, out_dir, character,
     for p in parts:
         name = p["tag"]
         out_png = os.path.join(img_dir, name + ".png")
-        if p["facial"] and sc != 1.0:
+        if p["resize"]:
             img = QImage(p["src"]).convertToFormat(QImage.Format_ARGB32)
             img = img.scaled(max(1, int(round(p["w"]))), max(1, int(round(p["h"]))),
                              Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
@@ -105,6 +104,7 @@ def export_to_spine(entries, transform, out_dir, character,
 
     os.makedirs(out_dir, exist_ok=True)
     json_path = os.path.join(out_dir, character + ".json")
-    json.dump(skeleton, open(json_path, "w", encoding="utf-8"), indent=2)
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(skeleton, f, indent=2)
     say("Spine project: %s (%d parts) -> %s" % (os.path.basename(json_path), len(parts), out_dir))
     return json_path

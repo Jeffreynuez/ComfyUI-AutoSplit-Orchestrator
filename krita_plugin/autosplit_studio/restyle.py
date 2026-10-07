@@ -32,8 +32,11 @@ def resolve_checkpoint(comfy_url, hint=CHECKPOINT_HINT):
     for o in opts:
         if hint.lower() in o.lower():
             return o
-    raise RuntimeError("No checkpoint matching '%s'. Some available: %s"
-                       % (hint, opts[:12]))
+    raise RuntimeError(
+        "No checkpoint matching '%s' (the October 2026 model cleanup removed the "
+        "SDXL/Illustrious checkpoints). Generate Skin is being rebuilt on Flux.2 "
+        "Klein 4B; until then set CHECKPOINT_HINT in restyle.py to a checkpoint "
+        "you have. Available: %s" % (hint, opts[:12] or "none"))
 
 
 def _graph(ckpt, image_ref, prompt, seed):
@@ -42,9 +45,11 @@ def _graph(ckpt, image_ref, prompt, seed):
         "12": {"class_type": "CLIPSetLastLayer",
                "inputs": {"clip": ["4", 1], "stop_at_clip_layer": CLIP_SKIP}},
         "10": {"class_type": "LoadImage", "inputs": {"image": image_ref}},
-        "11": {"class_type": "ImageScale", "inputs": {
+        # keep the character's aspect ratio: the June graph squashed every
+        # picture to 1024x1024, so a restyle could never line up with the base
+        "11": {"class_type": "ImageScaleToTotalPixels", "inputs": {
             "image": ["10", 0], "upscale_method": "lanczos",
-            "width": SIZE, "height": SIZE, "crop": "disabled"}},
+            "megapixels": round((SIZE * SIZE) / 1e6, 2), "resolution_steps": 8}},
         "5": {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["4", 2]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["12", 0]}},
         "7": {"class_type": "CLIPTextEncode", "inputs": {"text": NEG, "clip": ["12", 0]}},

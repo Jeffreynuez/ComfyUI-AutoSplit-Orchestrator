@@ -1,0 +1,404 @@
+{
+  "skeleton": {
+    "spine": "4.3.22",
+    "x": -529.5,
+    "y": 0.0,
+    "width": 1059,
+    "height": 2906,
+    "images": "./images/",
+    "audio": ""
+  },
+  "bones": [
+    {
+      "name": "root"
+    }
+  ],
+  "slots": [
+    {
+      "name": "hair_back",
+      "bone": "root",
+      "attachment": "hair_back"
+    },
+    {
+      "name": "left_leg",
+      "bone": "root",
+      "attachment": "left_leg"
+    },
+    {
+      "name": "left_foot",
+      "bone": "root",
+      "attachment": "left_foot"
+    },
+    {
+      "name": "torso",
+      "bone": "root",
+      "attachment": "torso"
+    },
+    {
+      "name": "left_hand",
+      "bone": "root",
+      "attachment": "left_hand"
+    },
+    {
+      "name": "left_arm",
+      "bone": "root",
+      "attachment": "left_arm"
+    },
+    {
+      "name": "right_leg",
+      "bone": "root",
+      "attachment": "right_leg"
+    },
+    {
+      "name": "right_foot",
+      "bone": "root",
+      "attachment": "right_foot"
+    },
+    {
+      "name": "under_shirt",
+      "bone": "root",
+      "attachment": "under_shirt"
+    },
+    {
+      "name": "left_shin_brace",
+      "bone": "root",
+      "attachment": "left_shin_brace"
+    },
+    {
+      "name": "face",
+      "bone": "root",
+      "attachment": "face"
+    },
+    {
+      "name": "bottom_lips",
+      "bone": "root",
+      "attachment": "bottom_lips"
+    },
+    {
+      "name": "lips",
+      "bone": "root",
+      "attachment": "lips"
+    },
+    {
+      "name": "nose",
+      "bone": "root",
+      "attachment": "nose"
+    },
+    {
+      "name": "eyebrow_left",
+      "bone": "root",
+      "attachment": "eyebrow_left"
+    },
+    {
+      "name": "eyebrow_right",
+      "bone": "root",
+      "attachment": "eyebrow_right"
+    },
+    {
+      "name": "left_eye",
+      "bone": "root",
+      "attachment": "left_eye"
+    },
+    {
+      "name": "right_eye",
+      "bone": "root",
+      "attachment": "right_eye"
+    },
+    {
+      "name": "left_iris",
+      "bone": "root",
+      "attachment": "left_iris"
+    },
+    {
+      "name": "right_iris",
+      "bone": "root",
+      "attachment": "right_iris"
+    },
+    {
+      "name": "right_shin_brace",
+      "bone": "root",
+      "attachment": "right_shin_brace"
+    },
+    {
+      "name": "hair_front",
+      "bone": "root",
+      "attachment": "hair_front"
+    },
+    {
+      "name": "jacket",
+      "bone": "root",
+      "attachment": "jacket"
+    },
+    {
+      "name": "skirt",
+      "bone": "root",
+      "attachment": "skirt"
+    },
+    {
+      "name": "green_sash",
+      "bone": "root",
+      "attachment": "green_sash"
+    },
+    {
+      "name": "right_hand",
+      "bone": "root",
+      "attachment": "right_hand"
+    },
+    {
+      "name": "right_arm",
+      "bone": "root",
+      "attachment": "right_arm"
+    }
+  ],
+  "skins": [
+    {
+      "name": "default",
+      "attachments": {
+        "hair_back": {
+          "hair_back": {
+            "x": 111.5,
+            "y": 2404.5,
+            "width": 146,
+            "height": 165,
+            "rotation": 0
+          }
+        },
+        "left_leg": {
+          "left_leg": {
+            "x": 211.0,
+            "y": 996.5,
+            "width": 325,
+            "height": 621,
+            "rotation": 0
+          }
+        },
+        "left_foot": {
+          "left_foot": {
+            "x": 298.0,
+            "y": 229.5,
+            "width": 387,
+            "height": 217,
+            "rotation": 0
+          }
+        },
+        "torso": {
+          "torso": {
+            "x": 51.0,
+            "y": 2062.0,
+            "width": 403,
+            "height": 578,
+            "rotation": 0
+          }
+        },
+        "left_hand": {
+          "left_hand": {
+            "x": 456.0,
+            "y": 1306.0,
+            "width": 147,
+            "height": 234,
+            "rotation": 0
+          }
+        },
+        "left_arm": {
+          "left_arm": {
+            "x": 368.5,
+            "y": 1844.5,
+            "width": 322,
+            "height": 953,
+            "rotation": 0
+          }
+        },
+        "right_leg": {
+          "right_leg": {
+            "x": -206.5,
+            "y": 654.5,
+            "width": 510,
+            "height": 1307,
+            "rotation": 0
+          }
+        },
+        "right_foot": {
+          "right_foot": {
+            "x": -351.0,
+            "y": 136.5,
+            "width": 223,
+            "height": 273,
+            "rotation": 0
+          }
+        },
+        "under_shirt": {
+          "under_shirt": {
+            "x": 62.0,
+            "y": 2115.5,
+            "width": 277,
+            "height": 343,
+            "rotation": 0
+          }
+        },
+        "left_shin_brace": {
+          "left_shin_brace": {
+            "x": 207.0,
+            "y": 528.0,
+            "width": 413,
+            "height": 540,
+            "rotation": 0
+          }
+        },
+        "face": {
+          "face": {
+            "x": 12.5,
+            "y": 2577.0,
+            "width": 358,
+            "height": 338,
+            "rotation": 0
+          }
+        },
+        "bottom_lips": {
+          "bottom_lips": {
+            "x": 79.5,
+            "y": 2478.0,
+            "width": 74,
+            "height": 44,
+            "rotation": 0
+          }
+        },
+        "lips": {
+          "lips": {
+            "x": 84.5,
+            "y": 2500.0,
+            "width": 84,
+            "height": 46,
+            "rotation": 0
+          }
+        },
+        "nose": {
+          "nose": {
+            "x": 103.5,
+            "y": 2549.5,
+            "width": 68,
+            "height": 65,
+            "rotation": 0
+          }
+        },
+        "eyebrow_left": {
+          "eyebrow_left": {
+            "x": 146.5,
+            "y": 2649.0,
+            "width": 66,
+            "height": 52,
+            "rotation": 0
+          }
+        },
+        "eyebrow_right": {
+          "eyebrow_right": {
+            "x": 67.5,
+            "y": 2652.0,
+            "width": 222,
+            "height": 58,
+            "rotation": 0
+          }
+        },
+        "left_eye": {
+          "left_eye": {
+            "x": 137.0,
+            "y": 2605.0,
+            "width": 57,
+            "height": 58,
+            "rotation": 0
+          }
+        },
+        "right_eye": {
+          "right_eye": {
+            "x": 15.0,
+            "y": 2612.0,
+            "width": 81,
+            "height": 58,
+            "rotation": 0
+          }
+        },
+        "left_iris": {
+          "left_iris": {
+            "x": 136.5,
+            "y": 2609.0,
+            "width": 44,
+            "height": 48,
+            "rotation": 0
+          }
+        },
+        "right_iris": {
+          "right_iris": {
+            "x": 24.0,
+            "y": 2615.0,
+            "width": 45,
+            "height": 48,
+            "rotation": 0
+          }
+        },
+        "right_shin_brace": {
+          "right_shin_brace": {
+            "x": -248.5,
+            "y": 484.5,
+            "width": 424,
+            "height": 521,
+            "rotation": 0
+          }
+        },
+        "hair_front": {
+          "hair_front": {
+            "x": -27.5,
+            "y": 2578.5,
+            "width": 580,
+            "height": 655,
+            "rotation": 0
+          }
+        },
+        "jacket": {
+          "jacket": {
+            "x": -1.0,
+            "y": 1873.0,
+            "width": 1057,
+            "height": 1074,
+            "rotation": 0
+          }
+        },
+        "skirt": {
+          "skirt": {
+            "x": 61.5,
+            "y": 1461.5,
+            "width": 650,
+            "height": 781,
+            "rotation": 0
+          }
+        },
+        "green_sash": {
+          "green_sash": {
+            "x": 155.0,
+            "y": 1450.5,
+            "width": 305,
+            "height": 757,
+            "rotation": 0
+          }
+        },
+        "right_hand": {
+          "right_hand": {
+            "x": -302.5,
+            "y": 1329.0,
+            "width": 178,
+            "height": 190,
+            "rotation": 0
+          }
+        },
+        "right_arm": {
+          "right_arm": {
+            "x": -357.5,
+            "y": 1819.5,
+            "width": 344,
+            "height": 971,
+            "rotation": 0
+          }
+        }
+      }
+    }
+  ],
+  "animations": {}
+}

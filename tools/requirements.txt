@@ -1,0 +1,7 @@
+# For the offline tools in this folder (ground truth, evaluate, wiggle,
+# reorder). The ComfyUI nodes use what ComfyUI already ships; the Krita
+# plugin needs nothing beyond Krita's own Python.
+numpy
+opencv-python
+Pillow
+psd-tools
