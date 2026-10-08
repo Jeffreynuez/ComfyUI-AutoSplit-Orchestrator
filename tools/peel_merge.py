@@ -10,7 +10,9 @@ hides it. This tool merges that back into a split:
   ownership   every visible pixel goes to the front-most part (draw order),
               so a jacket no longer carries the sleeves drawn in front of it
   fill        for each part named in the plan
-                hidden candidates = pixels owned by parts in front of it
+                hidden candidates = pixels owned by parts in front of it (plus,
+                                    for steps marked claim_unowned, visible
+                                    character pixels no part owns)
                 added             = peeled mask AND hidden candidates
                 part              = owned pixels + peeled pixels in `added`
 
@@ -25,13 +27,28 @@ A part's peeled shape is the union of the listed tags from that run. An
 optional "anchors": [tags] names parts the edit should have left alone; their
 pixels fit the colour map that undoes the edit's colour drift (default: the
 whole silhouette, keeping the best-agreeing 60%). "colour" forces one of raw,
-global, part, hist.
+global, part, hist, or "interior": one flat deep-shadow colour from the visible
+pixels of "interior_of" (default the part), for parts behind the head or body.
 
 A step may instead be a rule-based fill with no peeled picture:
   {"hull": {"tag": "hair_back", "group": ["hair_back", "hair_front"],
-            "close": 0.08, "colour": "shadow", "mode": "close" | "convex"}}
+            "close": 0.08, "colour": "interior" | "shadow" | "median",
+            "mode": "close" | "convex", "below": "face"}}
 fills the part inside the closed (or convex) outline of the group, behind the parts in
-front of it, with a flat colour from its own darkest visible pixels.
+front of it, no higher than the top of `below`, with one flat colour: "interior" is
+the group's deep shadow (what the Salena rig paints behind the head), "shadow" the
+part's own darkest visible pixels.
+
+Rigging-convention steps (autosplit_core/rigfill.py), applied after the fills:
+  {"underlap": {"tag": "left leg", "into": ["torso"], "length": 0.6}}
+      the part continues under the parts it joins, toward them, by a share of
+      its thickness, coloured from its nearest own pixels;
+  {"back_panel": {"of": "jacket", "tag": "jacket back"}}
+      a new part behind the body (in front of the back hair): inside the
+      garment's convex outline, in the garment's deep interior shadow;
+  {"skin_under": {"tag": "face", "features": ["left eye", "nose", ...]}}
+      the head under the facial features is plain skin (inpainted from the
+      face around them), as the rigger paints the head layer.
 
     python tools/peel_merge.py --run <body pass> [--run <facial pass>] --source <picture> \
         --plan plan.json --out <new body pass folder> [--no-own] [--raw-colour]
@@ -48,7 +65,7 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "ComfyUI-AutoSplit-Orchestrator"))
-from autosplit_core import ownership  # noqa: E402
+from autosplit_core import ownership, rigfill  # noqa: E402
 from partsio import back_to_front, load_pass  # noqa: E402
 
 import cv2  # noqa: E402
@@ -165,6 +182,10 @@ def main():
     silhouette = np.zeros((H, W), bool)
     for _, m in btf:
         silhouette |= m
+    # visible character pixels the split gave to no part: a fill may claim them
+    # (keeping their own colour) where its peeled shape covers them
+    orphan = rigfill.picture_silhouette(src_rgb) & (owner < 0)
+    names_idx = {n: i for i, (n, _) in enumerate(btf)}
 
     body_dir = args.run[0]
     os.makedirs(args.out, exist_ok=True)
@@ -210,6 +231,16 @@ def main():
             P = vis[tag] if not args.no_own else next(p for p in order if p.tag == tag).full_mask(W, H)
             box = ownership.expand_box(ownership.bbox(A | P), 0.05, (H, W))
             region, front = ownership.hidden_candidates(btf, tag, box=box, owner=owner)
+            bx0, by0, bx1, by1 = box
+            if step.get("claim_unowned"):
+                claim = np.zeros((H, W), bool)
+                claim[by0:by1, bx0:bx1] = orphan[by0:by1, bx0:bx1]
+                region = region | claim
+            # a limb does not continue into its own hand or foot (the rigger
+            # draws the leg over the foot, not the other way round)
+            skip = [names_idx[t] for t in step.get("exclude", {}).get(tag, []) if t in names_idx]
+            if skip:
+                region &= ~np.isin(owner, skip)
             add = A & region & ~P
             if tag in added:
                 add &= ~added[tag]["mask"]
@@ -248,8 +279,16 @@ def main():
                 if step.get("colour") in maps:
                     how = step["colour"]
                 px = maps[how](px)
+            if step.get("colour") == "interior":
+                # a part behind the head / body: one flat deep-shadow colour
+                idx = [names_idx[t] for t in step.get("interior_of", [tag]) if t in names_idx]
+                px = np.repeat(rigfill.interior_colour(src_rgb[np.isin(owner, idx)])[None], len(px), 0)
+                how = "interior"
             rec["mask"] |= add
             rec["rgb"][add] = px
+            seen = add & orphan                          # visible: keep the picture's paint
+            rec["rgb"][seen] = src_rgb[seen]
+            rec["claimed"] = rec.get("claimed", 0) + int(seen.sum())
             rec.setdefault("colour", []).append(how)
             rec["behind"] |= set(front)
             rec["sources"].append(os.path.basename(step["image"]))
@@ -290,13 +329,24 @@ def main():
             add &= ~added[tag]["mask"]
         if not add.any() or P.sum() < 50:
             continue
-        lab = rgb_to_lab(src_rgb[P])
-        if h.get("colour", "shadow") == "shadow":
-            dark = lab[:, 0] <= np.quantile(lab[:, 0], 0.3)
-            c = np.median(lab[dark], axis=0)
+        if h.get("below") in names_idx:
+            # back hair hangs from the scalp: nothing above the top of the head
+            head = vis[h["below"]] | (added[h["below"]]["mask"] if h["below"] in added else False)
+            if head.any():
+                add[:ownership.bbox(head)[1]] = False
+        mode = h.get("colour", "shadow")
+        if mode == "interior":
+            # behind the head and body the rig paints deep shadow
+            idx = [names_idx[t] for t in h.get("group", [tag]) if t in names_idx]
+            rgb = rigfill.interior_colour(src_rgb[np.isin(owner, idx)])
         else:
-            c = np.median(lab, axis=0)
-        rgb = lab_to_rgb(c[None, :])[0]
+            lab = rgb_to_lab(src_rgb[P])
+            if mode == "shadow":
+                dark = lab[:, 0] <= np.quantile(lab[:, 0], 0.3)
+                c = np.median(lab[dark], axis=0)
+            else:
+                c = np.median(lab, axis=0)
+            rgb = lab_to_rgb(c[None, :])[0]
         rec = added.setdefault(tag, {"mask": np.zeros((H, W), bool),
                                      "rgb": np.zeros((H, W, 3), np.uint8), "behind": set(),
                                      "sources": []})
@@ -305,6 +355,98 @@ def main():
         rec["behind"] |= set(front)
         rec["sources"].append("hull:" + "+".join(h.get("group", [tag])))
         rec.setdefault("colour", []).append("flat-" + h.get("colour", "shadow"))
+
+    # ---- rigging conventions: underlaps and back panels --------------------
+    paint = {}
+
+    def part_paint(tag):
+        """(filled mask, colours) of a body part after the fills so far."""
+        if tag not in paint:
+            p = next(q for q in order if q.tag == tag)
+            rgb = np.zeros((H, W, 3), np.uint8)
+            pm = np.zeros((H, W), bool)
+            p.paint_onto(rgb, pm)
+            m = (pm if args.no_own else vis[tag]).copy()
+            rec = added.get(tag)
+            if rec is not None:
+                rgb[rec["mask"]] = rec["rgb"][rec["mask"]]
+                m |= rec["mask"]
+            paint[tag] = (m, rgb)
+        return paint[tag]
+
+    # under the facial features the head is plain skin: the rigger paints the
+    # face layer without eyes or mouth, which are layers of their own
+    for step in plan:
+        if "skin_under" not in step:
+            continue
+        su = step["skin_under"]
+        tag = su["tag"]
+        if tag not in entries:
+            continue
+        under = [names_idx[t] for t in su.get("features", []) if t in names_idx]
+        face, rgb = part_paint(tag)
+        region = np.isin(owner, under) & cv2.dilate(face.astype(np.uint8), np.ones((9, 9), np.uint8)).astype(bool)
+        if region.sum() < 20:
+            continue
+        x0, y0, x1, y1 = ownership.expand_box(ownership.bbox(region), 0.1, (H, W))
+        known = face[y0:y1, x0:x1] & ~region[y0:y1, x0:x1]
+        crop = rgb[y0:y1, x0:x1].copy()
+        crop[~known] = 0
+        hole = (~known & (region[y0:y1, x0:x1] | ~face[y0:y1, x0:x1])).astype(np.uint8)
+        filled = cv2.inpaint(np.ascontiguousarray(crop), hole, 7, cv2.INPAINT_TELEA)
+        r = region[y0:y1, x0:x1]
+        rec = added.setdefault(tag, {"mask": np.zeros((H, W), bool),
+                                     "rgb": np.zeros((H, W, 3), np.uint8), "behind": set(),
+                                     "sources": []})
+        rec["mask"][y0:y1, x0:x1] |= r
+        rec["rgb"][y0:y1, x0:x1][r] = filled[r]
+        rec["sources"].append("skin_under:" + "+".join(t for t in su.get("features", []) if t in names_idx))
+        rec.setdefault("colour", []).append("inpaint")
+        paint.pop(tag, None)
+
+    for step in plan:
+        if "underlap" not in step:
+            continue
+        u = step["underlap"]
+        tag = u["tag"]
+        into = [t for t in u.get("into", []) if t in entries]
+        if tag not in entries or not into:
+            continue
+        child, rgb = part_paint(tag)
+        parent = np.zeros((H, W), bool)
+        for t in into:
+            parent |= part_paint(t)[0]
+        allowed, front = ownership.hidden_candidates(btf, tag, box=(0, 0, W, H), owner=owner)
+        stub = rigfill.underlap(child, parent, allowed, float(u.get("length", 0.5)))
+        if stub.sum() < 50:
+            continue
+        cols = rigfill.nearest_colours(rgb, child, stub)
+        rec = added.setdefault(tag, {"mask": np.zeros((H, W), bool),
+                                     "rgb": np.zeros((H, W, 3), np.uint8), "behind": set(),
+                                     "sources": []})
+        rec["mask"] |= stub
+        rec["rgb"][stub] = cols
+        rec["behind"] |= set(into)
+        rec["sources"].append("underlap:" + "+".join(into))
+        rec.setdefault("colour", []).append("nearest")
+        paint.pop(tag, None)
+
+    new_parts = []
+    back_hair = [i for i, (t, _) in enumerate(btf) if "hair" in t.lower() and "back" in t.lower()]
+    for step in plan:
+        if "back_panel" not in step:
+            continue
+        b = step["back_panel"]
+        of = b["of"]
+        if of not in entries:
+            continue
+        g, _ = part_paint(of)
+        panel = rigfill.back_panel(g) & (owner >= 0) & ~np.isin(owner, back_hair)
+        if panel.sum() < max(200, 0.03 * g.sum()):
+            continue
+        own_px = src_rgb[vis[of]] if vis[of].any() else src_rgb[g]
+        new_parts.append({"tag": b.get("tag", of + " back"), "of": of, "mask": panel,
+                          "rgb": rigfill.interior_colour(own_px)})
 
     report = []
     for p in order:
@@ -346,9 +488,43 @@ def main():
         if n_add:
             flags.add("filled")
             e["fill"] = {"added_px": n_add, "behind": sorted(rec["behind"]),
-                         "sources": rec["sources"], "colour": rec.get("colour", [])}
+                         "sources": rec["sources"], "colour": rec.get("colour", []),
+                         "claimed_unowned_px": rec.get("claimed", 0)}
         e["flags"] = sorted(flags)
         report.append((tag, int(full.sum() - own.sum()), n_add, sorted(rec["behind"]) if rec else []))
+
+    # back panels: new parts directly in front of the back hair
+    if new_parts:
+        body_entries = meta["parts"]
+        hair_idx = [e.get("draw_index", 0) for e in body_entries
+                    if "hair" in e["tag"].lower() and "back" in e["tag"].lower()]
+        pos = (max(hair_idx) + 1) if hair_idx else 0
+        prefix = meta.get("character") or "part"
+        for k, npart in enumerate(new_parts):
+            m = npart["mask"]
+            bx0, by0, bx1, by1 = ownership.bbox(m)
+            canvas = np.zeros((by1 - by0, bx1 - bx0, 4), np.uint8)
+            sub = m[by0:by1, bx0:bx1]
+            canvas[sub, :3] = npart["rgb"]
+            canvas[sub, 3] = 255
+            slug = "_".join(npart["tag"].lower().split())
+            fn = "%s_%s.png" % (prefix, slug)
+            Image.fromarray(canvas).save(os.path.join(args.out, fn))
+            for e in body_entries:
+                if e.get("draw_index") is not None and e["draw_index"] >= pos + k:
+                    e["draw_index"] += 1
+            body_entries.append({
+                "tag": npart["tag"], "source_part": npart["of"], "file": fn, "mask_file": None,
+                "mask_type": None, "xyxy": [bx0, by0, bx1, by1], "xyxy_full": [bx0, by0, bx1, by1],
+                "draw_index": pos + k, "passthrough": False, "area_px": int(m.sum()),
+                "flags": ["back_panel", "filled"], "in_front_of": [],
+                "fill": {"added_px": int(m.sum()), "sources": ["back_panel:" + npart["of"]],
+                         "colour": ["interior"]}})
+            report.append((npart["tag"], 0, int(m.sum()), ["(new part behind the body)"]))
+        n = len(body_entries)
+        for e in body_entries:
+            if e.get("draw_index") is not None:
+                e["z_order"] = n - 1 - e["draw_index"]
 
     meta["fill"] = {"plan": os.path.basename(args.plan), "owned": not args.no_own,
                     "colour_match": not args.raw_colour}

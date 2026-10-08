@@ -11,7 +11,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "ComfyUI-AutoSplit-Orchestrator"))
-from autosplit_core import drawing, masks, ordering, ownership, peel, sides  # noqa: E402
+from autosplit_core import drawing, masks, ordering, ownership, peel, rigfill, sides  # noqa: E402
 
 
 def rect(h, w, y0, y1, x0, x1):
@@ -226,6 +226,7 @@ def test_peel_plan_from_a_split():
     assert set(base["targets"]) == {"torso", "leg"}
     assert "skirt" in base["removes"] and "under shirt" in base["removes"]
     assert "underwear" in base["parts"]["torso"]
+    assert base["exclude"] == {}                                 # no foot in this scene
     assert "sports top" in base["prompt"]                      # never a topless base body
     skirt_job = next(j for j in jobs if j.get("name") == "garment_skirt")
     assert "the light green sash that lies over the green skirt" in skirt_job["prompt"]
@@ -246,6 +247,76 @@ def test_peel_jacket_behind_arm_and_skirt():
     assert job["removes"] == ["right arm"] and job["model"] == "9b"
     assert "sleeveless vest" in job["prompt"] and "skirt" not in job["prompt"]
     assert "vest" in job["sam_labels"]
+
+
+# -------------------------------------------------------------- rigfill --
+def test_underlap_sweeps_a_limb_under_its_parent():
+    H, W = 300, 200
+    torso = rect(H, W, 40, 160, 50, 150)
+    leg = rect(H, W, 160, 290, 60, 100)
+    stub = rigfill.underlap(leg, torso, torso, 0.6)
+    ys, xs = np.nonzero(stub)
+    assert stub.any() and ys.max() < 160 and ys.min() >= 160 - 0.6 * 40 - 4   # up, ~0.6 of its width
+    assert not (stub & ~torso).any()
+    arm = rect(H, W, 50, 200, 150, 185)
+    xs = np.nonzero(rigfill.underlap(arm, torso, torso, 0.35))[1]
+    assert xs.max() < 150 and xs.min() >= 150 - 0.35 * 35 - 4                  # sideways into the body
+
+
+def test_nearest_colours_skip_the_edge_line():
+    H, W = 120, 60
+    leg = rect(H, W, 40, 120, 10, 50)
+    rgb = np.zeros((H, W, 3), np.uint8)
+    rgb[leg] = (200, 150, 120)
+    rgb[40:44, 10:50] = (40, 30, 20)                  # a dark line where the briefs end
+    stub = rect(H, W, 20, 40, 10, 50)
+    cols = rigfill.nearest_colours(rgb, leg, stub)
+    assert (cols == (200, 150, 120)).all()
+
+
+def test_back_panel_fills_between_front_panels_in_deep_shadow():
+    H, W = 200, 200
+    jacket = rect(H, W, 60, 150, 40, 80) | rect(H, W, 60, 150, 120, 160) | rect(H, W, 170, 175, 10, 15)
+    panel = rigfill.back_panel(jacket)
+    assert panel[100, 100] and not panel[172, 12] and not (panel & jacket).any()
+    lab = rigfill.interior_colour(np.array([[127, 103, 72]] * 4, np.uint8)).astype(int)
+    assert lab.max() < 60                                                        # near black
+
+
+def test_rig_rules_for_a_split():
+    names = ["hair_back", "left leg", "torso", "left arm", "face", "left shin brace", "jacket", "skirt",
+             "green sash"]
+    cats = {n: ("facial" if False else peel.category(n)) for n in names}
+    rules = peel.rig_rules(names, cats, heads=["face"])
+    under = {r["underlap"]["tag"]: r["underlap"] for r in rules if "underlap" in r}
+    assert under["left leg"]["into"] == ["torso"] and under["left arm"]["into"] == ["torso", "jacket"]
+    assert under["torso"]["into"] == ["face"]
+    panels = [r["back_panel"]["tag"] for r in rules if "back_panel" in r]
+    assert panels == ["jacket back", "skirt back"]
+
+
+def test_picture_silhouette_keys_out_a_plain_background():
+    rgb = np.full((80, 80, 3), 83, np.uint8)
+    rgb[20:60, 20:60] = (200, 150, 120)
+    rgb[35:45, 35:45] = 83                       # a background-coloured hole inside
+    sil = rigfill.picture_silhouette(rgb)
+    assert sil[40, 40] and sil[25, 25] and not sil[5, 5] and not sil[70, 30]
+
+
+def test_plan_paints_plain_skin_under_the_facial_features():
+    H, W = 120, 120
+    rgb = np.full((H, W, 3), 80, np.uint8)
+    face = rect(H, W, 10, 80, 30, 90)
+    hair = rect(H, W, 5, 30, 25, 95)
+    nose = rect(H, W, 40, 50, 55, 65)
+    rgb[face] = (225, 160, 135)
+    rgb[hair] = (40, 150, 110)
+    rgb[nose] = (200, 120, 100)
+    jobs = peel.plan([("face", face), ("nose", nose), ("hair_front", hair)], rgb, facial={"nose"})
+    su = [j["skin_under"] for j in jobs if "skin_under" in j]
+    assert su == [{"tag": "face", "features": ["nose"]}]
+    head = next(j for j in jobs if j.get("kind") == "head")
+    assert head["claim_unowned"] is True
 
 
 if __name__ == "__main__":

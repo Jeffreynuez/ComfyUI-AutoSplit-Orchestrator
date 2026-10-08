@@ -14,7 +14,12 @@ pixels, with nothing written for a particular character:
   garment     a garment covered by other parts: remove what covers it
   head        a face/head covered by hair: remove the hair
   hair rule   back hair is filled by rule, not by an edit (generated back
-              hair came out far too long)
+              hair came out far too long): inside the outline of all the
+              hair, below the top of the head, in deep shadow
+  underlap    limbs continue under the part they join (thigh under the
+              briefs, sleeve under the jacket, neck behind the head)
+  back panel  open / wrap-around garments get a separate back layer behind
+              the body ("jacket back"), as riggers cut them
 
 Each part gets a readable name with a colour word from its own pixels
 ("the brown jacket"), which helps the edit model find it; when a part and what
@@ -66,6 +71,12 @@ LIMB_PLURAL = {"arm": "arms", "hand": "hands", "finger": "hands", "leg": "legs",
 UPPER_WORDS = ("jacket", "coat", "shirt", "top", "vest", "hoodie", "sweater", "blouse", "cardigan",
                "tunic", "robe", "bra", "corset", "cape", "cloak")
 LOWER_WORDS = ("skirt", "pant", "trouser", "short", "kilt", "legging")
+WRAP_WORDS = ("jacket", "coat", "cardigan", "vest", "hoodie", "cape", "cloak", "robe", "dress",
+              "skirt", "kilt")
+TORSO_WORDS = ("torso", "chest", "body", "hip", "pelvis", "waist")
+# how far a part continues under the part it joins, as a share of its own
+# thickness (read off the Salena FA rig; see autosplit_core/rigfill.py)
+UNDERLAP = {"leg": 0.6, "arm": 0.35, "neck": 0.5}
 
 _ALL_COLOUR_WORDS = {
     "black", "grey", "gray", "white", "brown", "tan", "beige", "cream", "red", "pink", "orange",
@@ -212,7 +223,11 @@ def limbs_phrase(tags):
 
 
 def _has(tag, words):
-    return any(w.startswith(k) for w in _words(tag) for k in words)
+    """A label word is one of `words`: short keys must match whole (plurals
+    allowed), so 'bra' is not 'brace' and 'top' is not 'topknot'."""
+    def hit(w, k):
+        return w == k or w in (k + "s", k + "es") or (len(k) >= 4 and w.startswith(k))
+    return any(hit(w, k) for w in _words(tag) for k in words)
 
 
 def join_names(names):
@@ -344,14 +359,24 @@ def plan(btf, rgb, facial=(), base_layer=BASE_LAYER, min_hidden=0.05, garment_pe
             extra = ["underwear", "sports top", "bra", "briefs", "bikini bottom", "neck"]
             parts[torso[0]] = [torso[0]] + extra
             sam += extra
+        # a limb is not filled into its own hand / foot (same side)
+        exclude = {}
+        for n in bare:
+            lw = limb_word(n)
+            if lw in ("leg", "arm"):
+                end = "foot" if lw == "leg" else "hand"
+                sd = [w for w in _words(n) if w in ("left", "right")]
+                ends = [m for m in names if limb_word(m) == end and sd and sd[0] in _words(m)]
+                if ends:
+                    exclude[n] = ends
         jobs.append({
-            "name": "base_body", "kind": "base body",
+            "name": "base_body", "kind": "base body", "exclude": exclude,
             "prompt": ("Edit this 2D character illustration. Remove %s, so that the character's"
                        " plain base body is visible, wearing only %s. Keep exactly the same pose,"
                        " position, size, proportions, face, hair, skin tone, line style and flat"
                        " cartoon shading, and the same plain background."
                        % (join_names([desc[c] for c in clothes]), base_layer)),
-            "model": "4b", "sam_labels": sam, "parts": parts,
+            "model": "4b", "sam_labels": sam, "parts": parts, "claim_unowned": True,
             "anchors": [n for n in names if cats[n] == "body" and (n in heads or is_bare(rgb, vis[n], skin_lab))],
             "colour": "global",
             "targets": bare, "removes": clothes,
@@ -393,7 +418,7 @@ def plan(btf, rgb, facial=(), base_layer=BASE_LAYER, min_hidden=0.05, garment_pe
                            " the face, the forehead up to the top of the skull, both ears and the"
                            " neck.") + KEEP,
                 "model": "4b", "sam_labels": ["head", "face", "left ear", "right ear"],
-                "parts": {h: ["head", "face", "left ear", "right ear"]},
+                "parts": {h: ["head", "face", "left ear", "right ear"]}, "claim_unowned": True,
                 "targets": [h], "removes": hair_front,
             })
 
@@ -401,5 +426,38 @@ def plan(btf, rgb, facial=(), base_layer=BASE_LAYER, min_hidden=0.05, garment_pe
     hair = [n for n in names if cats[n] == "hair"]
     for n in hair:
         if "back" in _words(n) or n.lower().startswith("back"):
-            jobs.append({"hull": {"tag": n, "group": hair, "mode": "convex", "colour": "shadow"}})
+            hull = {"tag": n, "group": hair, "mode": "convex", "colour": "interior"}
+            if heads:
+                hull["below"] = heads[0]
+            jobs.append({"hull": hull})
+
+    # 5. rigging conventions: plain skin under the facial features, underlaps
+    #    at the joints, back panels
+    feats = [n for n in names if cats[n] == "facial"]
+    for h in heads:
+        if feats:
+            jobs.append({"skin_under": {"tag": h, "features": feats}})
+    jobs += rig_rules(names, cats, heads)
     return jobs
+
+
+def rig_rules(names, cats, heads=()):
+    """Underlap and back-panel steps (tools/peel_merge.py plan format)."""
+    torso = [n for n in names if cats.get(n) == "body" and _has(n, TORSO_WORDS)]
+    upper = [n for n in names if cats.get(n) == "garment" and _has(n, UPPER_WORDS)]
+    out = []
+    for n in names:
+        if cats.get(n) != "body":
+            continue
+        lw = limb_word(n)
+        if lw == "leg" and torso:
+            out.append({"underlap": {"tag": n, "into": torso, "length": UNDERLAP["leg"]}})
+        elif lw == "arm" and (torso or upper):
+            out.append({"underlap": {"tag": n, "into": torso + upper, "length": UNDERLAP["arm"]}})
+    for t in torso:
+        if heads:
+            out.append({"underlap": {"tag": t, "into": list(heads), "length": UNDERLAP["neck"]}})
+    for n in names:
+        if cats.get(n) == "garment" and _has(n, WRAP_WORDS) and "back" not in _words(n):
+            out.append({"back_panel": {"of": n, "tag": readable(n) + " back"}})
+    return out

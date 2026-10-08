@@ -107,9 +107,10 @@ def build(runs, source, comfy_image, comfy_output, subdir, out, template=DEFAULT
     plan, summary, workflows = [], [], []
     out_base = os.path.join(comfy_output, *subdir.split("/"))
     for job in jobs:
-        if "hull" in job:
+        rule = next((k for k in ("hull", "underlap", "back_panel", "skin_under") if k in job), None)
+        if rule:
             plan.append(job)
-            summary.append({"rule": job["hull"]})
+            summary.append({"rule": {rule: job[rule]}})
             continue
         if model != "auto":
             job["model"] = model
@@ -121,7 +122,7 @@ def build(runs, source, comfy_image, comfy_output, subdir, out, template=DEFAULT
         step = {"image": os.path.join(out_base, job["name"] + "_up_00001_.png"),
                 "run": os.path.join(out_base, job["name"]),
                 "parts": job["parts"], "job": job["name"]}
-        for k in ("anchors", "colour"):
+        for k in ("anchors", "colour", "exclude", "claim_unowned"):
             if k in job:
                 step[k] = job[k]
         plan.append(step)

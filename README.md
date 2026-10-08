@@ -121,6 +121,7 @@ python spine_export.py --run-id <the run id it printed> --character MyCharacter
 python tools/gt_from_psd.py <layered.psd> --group <view group> --out <gt folder>
 python tools/evaluate.py --gt <gt folder> --map tools/gt_maps/<map>.json --run <body run> --run <facial run>
 python tools/wiggle.py --run <body run> --run <facial run> --gt <gt folder> --out sheet.png
+python tools/part_diff.py --gt <gt folder> --map tools/gt_maps/<map>.json --run <body run> --run <facial run> --out diff.jpg
 python tests/test_core.py && python tests/test_node_smoke.py
 ```
 
@@ -130,7 +131,7 @@ The map file ties the tool's part names to the PSD's layer names (`tools/gt_maps
 
 ## Limitations
 
-- **Hidden-region fill is a prototype outside the node.** Each part is the pixels you can see, so pulling the parts apart shows holes where one part covered another (the exploded view above). `tools/run_fill.py` fills them by "peeling": Flux.2 Klein edits of the picture with the front layers removed in the same pose, planned from the part labels and draw order (no per-character prompts), split again with SAM 3 and merged into the hidden areas. On Salena it scores Rig Match 0.616 against the hand-cut rig (0.470 without fill; 0.624 with hand-written prompts). It needs a running ComfyUI with the Klein 4B and 9B models:
+- **Hidden-region fill is a prototype outside the node.** Each part is the pixels you can see, so pulling the parts apart shows holes where one part covered another (the exploded view above). `tools/run_fill.py` fills them by "peeling": Flux.2 Klein edits of the picture with the front layers removed in the same pose, planned from the part labels and draw order (no per-character prompts), split again with SAM 3 and merged into the hidden areas. Rigging conventions are then applied by rule (`autosplit_core/rigfill.py`): limbs continue under the part they join (thigh under the briefs, sleeve under the jacket, neck behind the head), open garments get their own back layer (`jacket back`, `skirt back`) behind the body, back hair and garment backs are painted in deep shadow, and the head is plain skin under the facial features. On Salena it scores Rig Match 0.685 against the hand-cut rig (0.470 without fill; 0.624 with hand-written prompts). It needs a running ComfyUI with the Klein 4B and 9B models:
 
   ```
   python tools/run_fill.py --run <body run> --run <facial run> --source <picture> [--base-layer "a light green sports bra and briefs"]
