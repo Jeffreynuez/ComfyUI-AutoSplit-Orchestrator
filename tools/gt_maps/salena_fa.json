@@ -47,6 +47,7 @@
     "left_arm": "left arm", "right_arm": "right arm",
     "left_leg": "left leg", "right_leg": "right leg",
     "left_shin_brace": "left shin brace", "right_shin_brace": "right shin brace",
-    "green_sash": "green sash", "under_shirt": "under shirt", "bottom_lips": "bottom lips"
+    "green_sash": "green sash", "under_shirt": "under shirt", "bottom_lips": "bottom lips",
+    "jacket back": "jacket", "skirt back": "skirt"
   }
 }
