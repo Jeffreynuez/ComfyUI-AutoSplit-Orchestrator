@@ -22,6 +22,7 @@ def _load(name):
 
 evaluate = _load("evaluate")
 peel_merge = _load("peel_merge")
+peel_plan = _load("peel_plan")
 
 
 def test_colour_sim_same_paint_scores_one_and_other_paint_zero():
@@ -48,6 +49,22 @@ def test_colour_map_undoes_a_global_shift_and_ignores_changed_pixels():
     back = peel_merge.apply_colour_map(peel[100:].reshape(-1, 3), M)
     assert peel_merge.lab_err(back, orig[100:].reshape(-1, 3)) < 3.0
     assert M[0, 1] == 0 and M[1, 0] == 0                 # no cross-channel terms
+
+
+def test_peel_workflow_wires_edit_into_a_full_size_split():
+    job = {"name": "garment_skirt", "prompt": "Remove the green sash ...", "model": "9b",
+           "sam_labels": ["skirt", "green skirt"]}
+    tmpl = peel_plan._template_nodes(peel_plan.DEFAULT_TEMPLATE)
+    wf = peel_plan.peel_workflow(job, "picture.png", "autosplit_fill/t", tmpl)
+    assert wf["1"]["inputs"]["image"] == "picture.png"
+    assert "9b" in wf["3"]["inputs"]["unet_name"]
+    assert wf["41"]["inputs"]["image"] == ["14", 0]                      # edit, scaled back
+    assert wf["41"]["inputs"]["width"] == ["40", 0] and wf["40"]["inputs"]["image"] == ["1", 0]
+    o = wf["45"]["inputs"]
+    assert o["image"] == ["41", 0] and o["depth_map"] == ["43", 0] and o["sam3_model"] == ["44", 0]
+    assert o["part_labels"] == "skirt\ngreen skirt" and o["run_id"] == "garment_skirt"
+    assert o["output_directory"] == "autosplit_fill/t" and o["auto_lr_split_parts"] == ""
+    assert wf["42"]["inputs"]["filename_prefix"] == "autosplit_fill/t/garment_skirt_up"
 
 
 if __name__ == "__main__":
