@@ -208,6 +208,36 @@ def run_split(comfy_url, workflow_api_path, image_path, progress=None, timeout_s
     raise TimeoutError("Split timed out after %ds." % timeout_s)
 
 
+def queue_and_wait(comfy_url, wf, progress=None, timeout_s=1800, label="workflow"):
+    """Queue an API-format workflow and wait for it. Returns the history
+    entry; raises with ComfyUI's own error message if it fails."""
+    def say(m):
+        if progress:
+            progress(m)
+    res = _post_json(comfy_url + "/prompt", {"prompt": wf, "client_id": uuid.uuid4().hex})
+    pid = res["prompt_id"]
+    say("queued %s (%s)" % (label, pid[:8]))
+    start, last_tick = time.time(), 0
+    while time.time() - start < timeout_s:
+        hist = _get_json(comfy_url + "/history/" + pid)
+        if pid in hist:
+            entry = hist[pid]
+            st = entry.get("status", {})
+            if st.get("status_str") == "error":
+                msgs = [m for m in st.get("messages", []) if m and m[0] == "execution_error"]
+                detail = msgs[0][1].get("exception_message", "") if msgs else ""
+                raise RuntimeError("%s failed: %s" % (label, detail or "see ComfyUI console"))
+            if st.get("completed") or entry.get("outputs"):
+                say("%s finished in %.0fs" % (label, time.time() - start))
+                return entry
+        elapsed = time.time() - start
+        if elapsed - last_tick >= 10:
+            last_tick = elapsed
+            say("...%s running (%.0fs)" % (label, elapsed))
+        time.sleep(1.0)
+    raise TimeoutError("%s timed out after %ds." % (label, timeout_s))
+
+
 def _pass_folders(output_dir, subdirs=None, passes=None):
     if passes:
         out = []

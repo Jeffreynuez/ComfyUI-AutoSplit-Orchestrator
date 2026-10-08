@@ -71,7 +71,7 @@ def expand_box(box, frac, shape, min_px=16):
     return max(0, x0 - dx), max(0, y0 - dy), min(W, x1 + dx), min(H, y1 + dy)
 
 
-def hidden_candidates(masks_btf, name, expand=0.35, box=None):
+def hidden_candidates(masks_btf, name, expand=0.35, box=None, owner=None):
     """Where `name` may continue behind the parts in front of it.
 
     The region is the pixels owned by parts drawn in front of `name`, limited
@@ -81,7 +81,8 @@ def hidden_candidates(masks_btf, name, expand=0.35, box=None):
     inside the region, i.e. the ones actually covering it."""
     names = [n for n, _ in masks_btf]
     i = names.index(name)
-    owner, _ = owner_map(masks_btf)
+    if owner is None:
+        owner, _ = owner_map(masks_btf)
     own = owner == i
     if box is None:
         b = bbox(masks_btf[i][1])

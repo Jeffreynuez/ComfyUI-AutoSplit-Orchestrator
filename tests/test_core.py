@@ -11,7 +11,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "ComfyUI-AutoSplit-Orchestrator"))
-from autosplit_core import drawing, masks, ordering, ownership, sides  # noqa: E402
+from autosplit_core import drawing, masks, ordering, ownership, peel, sides  # noqa: E402
 
 
 def rect(h, w, y0, y1, x0, x1):
@@ -162,6 +162,90 @@ def test_hidden_candidates_are_front_parts_near_the_part():
     assert front == ["shirt"]
     assert region[90, 100] and not region[190, 10] and not region[50, 100]
     assert abs(ownership.hidden_share(btf, "torso")) < 1e-9
+
+
+# ----------------------------------------------------------------- peel --
+def test_peel_categories_and_names():
+    assert peel.category("left shin brace") == "garment"
+    assert peel.category("under shirt") == "garment"
+    assert peel.category("hair_back") == "hair"
+    assert peel.category("left leg") == "body" and peel.category("face") == "body"
+    assert peel.category("bottom lips") == "facial" and peel.category("eyebrow_left") == "facial"
+    assert peel.category("glowing amulet") == "garment"          # unknown: an accessory
+    assert peel.readable("hair_front") == "front hair"
+    assert peel.join_names(["the brown left shin brace", "the brown right shin brace", "the sash"]) \
+        == "both brown shin braces and the sash"
+    assert peel.describe("green sash", np.full((10, 3), 120, np.uint8)) == "the green sash"
+
+
+def test_peel_colour_words_and_shades():
+    def name(rgb):
+        return peel.colour_word(np.array([rgb] * 4, np.uint8))
+    assert name((99, 71, 59)) == "brown"            # muted dark brown, not "dark grey"
+    assert name((127, 103, 72)) == "brown" and name((197, 185, 160)) == "beige"
+    assert name((102, 151, 83)) == "green" and name((37, 83, 65)) == "dark green"
+    assert name((80, 80, 80)) == "dark grey" and name((40, 80, 200)) == "blue"
+    assert name((220, 30, 30)) == "red" and name((120, 50, 160)) == "purple"
+    assert peel.shade_apart("the green sash", "the green skirt", 66, 58) == "the light green sash"
+    assert peel.shade_apart("the green sash", "the green skirt", 60, 58) == "the green sash"
+    assert peel.shade_apart("the brown jacket", "the green skirt", 30, 58) == "the brown jacket"
+    assert peel.limbs_phrase(["right hand"]) == "both of the character's hands"
+    assert peel.limbs_phrase(["left arm", "right hand"]) == "both of the character's arms and hands"
+
+
+def test_peel_garment_prompts():
+    p = peel.garment_prompt("the green skirt", ["the light green sash"], ["right hand"], False)
+    assert p.startswith("Remove the light green sash that lies over the green skirt and remove both"
+                        " of the character's hands, so that the green skirt is fully visible")
+    p = peel.garment_prompt("the brown jacket", [], ["right arm"], True)
+    assert "as if the character had no arms" in p and "the brown jacket as a sleeveless vest" in p
+    assert "right" not in p.split("Keep")[0]
+
+
+def test_peel_plan_from_a_split():
+    H, W = 240, 200
+    rgb = np.full((H, W, 3), 80, np.uint8)
+    skin, shirt, cloth = (225, 160, 135), (235, 225, 195), (75, 160, 75)
+    face = rect(H, W, 10, 50, 70, 130)
+    hair_back = rect(H, W, 5, 70, 55, 145)
+    hair_front = rect(H, W, 5, 25, 60, 140)
+    torso = rect(H, W, 50, 150, 60, 140)        # mostly under the shirt
+    top = rect(H, W, 60, 120, 55, 145)
+    leg = rect(H, W, 140, 235, 75, 125)
+    skirt = rect(H, W, 140, 190, 55, 145)       # covers the top of the leg
+    sash = rect(H, W, 145, 185, 100, 140)
+    for m, c in ((hair_back, (30, 120, 90)), (face, skin), (torso, skin), (leg, skin),
+                 (top, shirt), (skirt, cloth), (sash, (165, 215, 140)), (hair_front, (40, 150, 110))):
+        rgb[m] = c
+    btf = [("hair_back", hair_back), ("torso", torso), ("leg", leg), ("face", face),
+           ("under shirt", top), ("skirt", skirt), ("green sash", sash), ("hair_front", hair_front)]
+    jobs = peel.plan(btf, rgb)
+    kinds = {j.get("kind", "rule") for j in jobs}
+    assert {"base body", "garment", "head", "rule"} <= kinds, kinds
+    base = next(j for j in jobs if j.get("kind") == "base body")
+    assert set(base["targets"]) == {"torso", "leg"}
+    assert "skirt" in base["removes"] and "under shirt" in base["removes"]
+    assert "underwear" in base["parts"]["torso"]
+    assert "sports top" in base["prompt"]                      # never a topless base body
+    skirt_job = next(j for j in jobs if j.get("name") == "garment_skirt")
+    assert "the light green sash that lies over the green skirt" in skirt_job["prompt"]
+    assert skirt_job["model"] == "4b"
+    assert any("hull" in j and j["hull"]["tag"] == "hair_back" for j in jobs)
+
+
+def test_peel_jacket_behind_arm_and_skirt():
+    H, W = 240, 200
+    rgb = np.full((H, W, 3), 80, np.uint8)
+    jacket = rect(H, W, 40, 150, 50, 150)
+    skirt = rect(H, W, 130, 200, 50, 150)       # the jacket hem tucks behind the skirt
+    arm = rect(H, W, 40, 160, 40, 75)           # a sleeve over the jacket's side
+    for m, c in ((jacket, (127, 103, 72)), (skirt, (102, 151, 83)), (arm, (120, 95, 65))):
+        rgb[m] = c
+    jobs = peel.plan([("jacket", jacket), ("skirt", skirt), ("right arm", arm)], rgb)
+    job = next(j for j in jobs if j.get("name") == "garment_jacket")
+    assert job["removes"] == ["right arm"] and job["model"] == "9b"
+    assert "sleeveless vest" in job["prompt"] and "skirt" not in job["prompt"]
+    assert "vest" in job["sam_labels"]
 
 
 if __name__ == "__main__":

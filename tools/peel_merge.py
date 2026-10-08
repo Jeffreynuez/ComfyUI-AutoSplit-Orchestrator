@@ -160,7 +160,8 @@ def main():
     W, H = src_im.size
     src_rgb = np.asarray(src_im)
     btf = [(p.tag, p.full_mask(W, H)) for p in order]
-    vis = ownership.visible(btf)
+    owner, _ = ownership.owner_map(btf)
+    vis = {n: owner == i for i, (n, _) in enumerate(btf)}
     silhouette = np.zeros((H, W), bool)
     for _, m in btf:
         silhouette |= m
@@ -208,7 +209,7 @@ def main():
                 continue
             P = vis[tag] if not args.no_own else next(p for p in order if p.tag == tag).full_mask(W, H)
             box = ownership.expand_box(ownership.bbox(A | P), 0.05, (H, W))
-            region, front = ownership.hidden_candidates(btf, tag, box=box)
+            region, front = ownership.hidden_candidates(btf, tag, box=box, owner=owner)
             add = A & region & ~P
             if tag in added:
                 add &= ~added[tag]["mask"]
@@ -283,7 +284,7 @@ def main():
             cv2.floodFill(ff, None, (0, 0), 2)
             closed = (ff[1:-1, 1:-1] != 2)
         P = vis[tag]
-        region, front = ownership.hidden_candidates(btf, tag, box=(x0, y0, x1, y1))
+        region, front = ownership.hidden_candidates(btf, tag, box=(x0, y0, x1, y1), owner=owner)
         add = closed & region & ~P
         if tag in added:
             add &= ~added[tag]["mask"]

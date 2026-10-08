@@ -130,7 +130,13 @@ The map file ties the tool's part names to the PSD's layer names (`tools/gt_maps
 
 ## Limitations
 
-- **Hidden regions are not painted yet.** Each part is the pixels you can see, so pulling the parts apart shows holes where one part covered another (the exploded view above). Filling them in the character's own style is the next milestone. The old OpenCV fill is still in the node (`enable_inpainting`) but off by default, because it leaves grey smears.
+- **Hidden-region fill is a prototype outside the node.** Each part is the pixels you can see, so pulling the parts apart shows holes where one part covered another (the exploded view above). `tools/run_fill.py` fills them by "peeling": Flux.2 Klein edits of the picture with the front layers removed in the same pose, planned from the part labels and draw order (no per-character prompts), split again with SAM 3 and merged into the hidden areas. On Salena it scores Rig Match 0.616 against the hand-cut rig (0.470 without fill; 0.624 with hand-written prompts). It needs a running ComfyUI with the Klein 4B and 9B models:
+
+  ```
+  python tools/run_fill.py --run <body run> --run <facial run> --source <picture> [--base-layer "a light green sports bra and briefs"]
+  ```
+
+  `--base-layer` is the rig's convention for what the base body wears (default: a plain sports top and briefs). The old OpenCV fill is still in the node (`enable_inpainting`) but off by default, because it leaves grey smears.
 - **One ground-truth character so far.** The numbers above are one character, one view. More hand-cut rigs are needed before the draw-order weights can be trusted beyond it.
 - **Parts that contain a neighbour** (jacket with sleeves, skirt with sash) are kept as SAM 3 returns them; deciding which part owns the shared pixels is not done yet.
 - **Generate Skin is being rebuilt.** Its checkpoints were retired; the restyle path will move to Flux Klein.
