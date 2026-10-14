@@ -135,3 +135,45 @@ def split_by_depth(mask, near_map, min_share=0.15, min_gap=0.04):
         return None
     front, back = drop_islands(front, 0.05), drop_islands(back, 0.05)
     return front, back
+
+
+def split_hair(mask, near_map, head=None, margin=0.08, min_area=80):
+    """Split a hair mask into (front, back) the way a rigger does: back hair
+    is what lies behind the head, not just the farther of two blobs.
+
+    With a head/face mask, a connected piece of hair is back hair only when
+    its median nearness is clearly behind the head's (by `margin`, on the
+    0-1 nearness scale); everything else is front hair, and back is None
+    when no piece is behind the head (the fill then builds the back hair).
+    A single blob is split by depth only if its far group is behind the head.
+    Without a head mask: the older rule (nearer of the two largest pieces is
+    front, else an Otsu split on depth).
+
+    On Salena FA the hair behind the neck sits 0.23 against a face at 0.46;
+    on FA2 the long hair over the shoulder (0.42) is front hair beside a face
+    at 0.44, which the old rule wrongly sent to the back."""
+    m = as_bool(mask)
+    nm = near_map if near_map.shape == m.shape else resize_to(near_map, m.shape)
+    comps = components(m, min_area=min_area)
+    if not comps:
+        return None
+    h = as_bool(head) if head is not None else None
+    if h is None or h.shape != m.shape or not h.any():
+        if len(comps) >= 2:
+            a, b = comps[0], comps[1]
+            return (a, b) if float(np.median(nm[a])) >= float(np.median(nm[b])) else (b, a)
+        return split_by_depth(m, nm)
+    limit = float(np.median(nm[h])) - margin
+    back = np.zeros_like(m)
+    for c in comps:
+        if float(np.median(nm[c])) < limit:
+            back |= c
+    if not back.any() and len(comps) == 1:
+        sp = split_by_depth(m, nm)
+        if sp is not None and float(np.median(nm[sp[1]])) < limit:
+            return sp
+    front = m & ~back
+    if not front.any():
+        return None
+    return front, (back if back.any() else None)
+

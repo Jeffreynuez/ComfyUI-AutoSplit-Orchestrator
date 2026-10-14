@@ -424,12 +424,19 @@ def plan(btf, rgb, facial=(), base_layer=BASE_LAYER, min_hidden=0.05, garment_pe
 
     # 4. back hair by rule
     hair = [n for n in names if cats[n] == "hair"]
-    for n in hair:
-        if "back" in _words(n) or n.lower().startswith("back"):
-            hull = {"tag": n, "group": hair, "mode": "convex", "colour": "interior"}
-            if heads:
-                hull["below"] = heads[0]
-            jobs.append({"hull": hull})
+    backs = [n for n in hair if "back" in _words(n) or n.lower().startswith("back")]
+    for n in backs:
+        hull = {"tag": n, "group": hair, "mode": "convex", "colour": "interior"}
+        if heads:
+            hull["below"] = heads[0]
+        jobs.append({"hull": hull})
+    if hair and not backs:
+        # the split saw no hair behind the head: build the back hair as a new
+        # part at the very back, inside the outline of all the hair
+        panel = {"of": hair, "tag": "hair_back", "hair": True}
+        if heads:
+            panel["below"] = heads[0]
+        jobs.append({"back_panel": panel})
 
     # 5. rigging conventions: plain skin under the facial features, underlaps
     #    at the joints, back panels

@@ -19,7 +19,11 @@ Keep the output OUT of git: it is the artist's artwork.
 Usage:
     pip install psd-tools
     python tools/gt_from_psd.py "Salena Turnaround AI image test.psd" \
-        --group FA --out "C:/dev/AI Work/AutoSplit/ground_truth/salena_fa"
+        --group FA --out "C:/dev/AI Work/AutoSplit/ground_truth/salena_fa" \
+        --background "#535353"
+
+The group may be hidden in the PSD (a turnaround shows one view at a time);
+it is shown while rendering.
 """
 import argparse
 import json
@@ -97,6 +101,15 @@ def main():
         if id(layer) not in keep and layer.visible:
             saved[id(layer)] = layer
             layer.visible = False
+    # a view group may be hidden in the PSD (turnarounds show one view at a
+    # time): show it and its parents while rendering
+    shown = []
+    node = group
+    while node is not None and node is not psd:
+        if not node.visible:
+            node.visible = True
+            shown.append(node)
+        node = node.parent
     comp = psd.composite(force=True, color=0.0, alpha=0.0)
     for layer in saved.values():
         layer.visible = True
@@ -137,6 +150,9 @@ def main():
             "opacity": int(getattr(layer, "opacity", 255)),
             "is_overlay": any(w in name.lower() + " " for w in OVERLAY_WORDS),
         })
+
+    for layer in shown:
+        layer.visible = False
 
     meta = {
         "source": os.path.basename(args.psd),

@@ -45,7 +45,10 @@ Rigging-convention steps (autosplit_core/rigfill.py), applied after the fills:
       its thickness, coloured from its nearest own pixels;
   {"back_panel": {"of": "jacket", "tag": "jacket back"}}
       a new part behind the body (in front of the back hair): inside the
-      garment's convex outline, in the garment's deep interior shadow;
+      garment's convex outline (from its peeled shape when it has one), in
+      the garment's deep interior shadow. With "of": [hair parts],
+      "hair": true and "below": "face" it builds the back hair at the very
+      back when the split found none;
   {"skin_under": {"tag": "face", "features": ["left eye", "nose", ...]}}
       the head under the facial features is plain skin (inpainted from the
       face around them), as the rigger paints the head layer.
@@ -142,7 +145,10 @@ def _hist_via(q, gen_part, own_px):
 
 
 def keep_islands(add, P, A_area, min_share):
-    """Keep added islands that are big or that touch the part's own pixels."""
+    """Keep added islands that touch the part's own pixels, or that are a
+    large share of its peeled shape. A hidden area continues what is visible;
+    a detached island is usually something the edit invented (a cuff left
+    floating at the jacket's hem)."""
     n, labels, stats, _ = cv2.connectedComponentsWithStats(add.astype(np.uint8), connectivity=8)
     near = cv2.dilate(P.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
     touching = set(np.unique(labels[near & add]).tolist())
@@ -161,7 +167,9 @@ def main():
     ap.add_argument("--no-own", action="store_true", help="keep each part's full SAM 3 mask")
     ap.add_argument("--raw-colour", action="store_true",
                     help="keep the peeled picture's colours as they are")
-    ap.add_argument("--min-island", type=float, default=0.01)
+    ap.add_argument("--min-island", type=float, default=0.3,
+                    help="keep an added island that does not touch the part when it is at"
+                         " least this share of the part's peeled shape")
     ap.add_argument("--max-map-rmse", type=float, default=8.0,
                     help="ignore a fitted colour map whose fit error (Lab) is above this")
     args = ap.parse_args()
@@ -198,6 +206,7 @@ def main():
 
     # what each part gets added, from every plan step that names it
     added = {}
+    shapes = {}   # each part's whole shape in the peeled pictures
     for step in plan:
         if "image" not in step:
             continue
@@ -228,6 +237,8 @@ def main():
                     A |= peeled[s]
             if not A.any():
                 continue
+            shapes.setdefault(tag, np.zeros((H, W), bool))
+            shapes[tag] |= A
             P = vis[tag] if not args.no_own else next(p for p in order if p.tag == tag).full_mask(W, H)
             box = ownership.expand_box(ownership.bbox(A | P), 0.05, (H, W))
             region, front = ownership.hidden_candidates(btf, tag, box=box, owner=owner)
@@ -437,16 +448,42 @@ def main():
         if "back_panel" not in step:
             continue
         b = step["back_panel"]
-        of = b["of"]
-        if of not in entries:
+        ofs = [t for t in ([b["of"]] if isinstance(b["of"], str) else b["of"]) if t in entries]
+        if not ofs or b.get("tag") in entries:
             continue
-        g, _ = part_paint(of)
-        panel = rigfill.back_panel(g) & (owner >= 0) & ~np.isin(owner, back_hair)
+        g = np.zeros((H, W), bool)
+        own = np.zeros((H, W), bool)
+        outline = np.zeros((H, W), bool)
+        for t in ofs:
+            g |= part_paint(t)[0]
+            own |= vis[t]
+            # the outline comes from the peeled picture when there is one (a
+            # whole vest), so a stray cuff or a thin visible strip does not
+            # bend it
+            outline |= shapes.get(t, np.zeros((H, W), bool))
+        outline |= g
+        is_hair = bool(b.get("hair"))
+        panel = rigfill.back_panel(outline) & ~g & (owner >= 0)
+        if not is_hair and own.any():
+            # a peeled garment can come out longer than the real one: the back
+            # panel stays between the visible garment's top and hem
+            vb = ownership.bbox(rigfill.main_islands(own, 0.25))
+            panel[:vb[1]] = False
+            panel[vb[3]:] = False
+        if not is_hair:
+            panel &= ~np.isin(owner, back_hair)
+        below = b.get("below")
+        if below in entries:
+            head = part_paint(below)[0]
+            if head.any():
+                panel[:ownership.bbox(head)[1]] = False
         if panel.sum() < max(200, 0.03 * g.sum()):
             continue
-        own_px = src_rgb[vis[of]] if vis[of].any() else src_rgb[g]
-        new_parts.append({"tag": b.get("tag", of + " back"), "of": of, "mask": panel,
-                          "rgb": rigfill.interior_colour(own_px)})
+        own_px = src_rgb[own] if own.any() else src_rgb[g]
+        new_parts.append({"tag": b.get("tag", ofs[0] + " back"), "of": "+".join(ofs), "mask": panel,
+                          "rgb": rigfill.interior_colour(own_px), "hair": is_hair})
+    # back hair made here goes to the very back, garment backs just in front of it
+    new_parts.sort(key=lambda q: not q["hair"])
 
     report = []
     for p in order:
@@ -456,7 +493,7 @@ def main():
         full = p.full_mask(W, H)
         own = full if args.no_own else vis[tag]
         rec = added.get(tag)
-        if rec is None and own.sum() == full.sum():
+        if rec is None and (own == full).all():
             continue  # untouched
         rgb = np.zeros((H, W, 3), np.uint8)
         pm = np.zeros((H, W), bool)
@@ -498,9 +535,15 @@ def main():
         body_entries = meta["parts"]
         hair_idx = [e.get("draw_index", 0) for e in body_entries
                     if "hair" in e["tag"].lower() and "back" in e["tag"].lower()]
-        pos = (max(hair_idx) + 1) if hair_idx else 0
+        n_hair = sum(1 for q in new_parts if q["hair"])
+        pos = (max(hair_idx) + 1 + n_hair) if hair_idx else n_hair
         prefix = meta.get("character") or "part"
-        for k, npart in enumerate(new_parts):
+        k_hair = k_rest = 0
+        for npart in new_parts:
+            if npart["hair"]:
+                at, k_hair = k_hair, k_hair + 1
+            else:
+                at, k_rest = pos + k_rest, k_rest + 1
             m = npart["mask"]
             bx0, by0, bx1, by1 = ownership.bbox(m)
             canvas = np.zeros((by1 - by0, bx1 - bx0, 4), np.uint8)
@@ -511,12 +554,12 @@ def main():
             fn = "%s_%s.png" % (prefix, slug)
             Image.fromarray(canvas).save(os.path.join(args.out, fn))
             for e in body_entries:
-                if e.get("draw_index") is not None and e["draw_index"] >= pos + k:
+                if e.get("draw_index") is not None and e["draw_index"] >= at:
                     e["draw_index"] += 1
             body_entries.append({
                 "tag": npart["tag"], "source_part": npart["of"], "file": fn, "mask_file": None,
                 "mask_type": None, "xyxy": [bx0, by0, bx1, by1], "xyxy_full": [bx0, by0, bx1, by1],
-                "draw_index": pos + k, "passthrough": False, "area_px": int(m.sum()),
+                "draw_index": at, "passthrough": False, "area_px": int(m.sum()),
                 "flags": ["back_panel", "filled"], "in_front_of": [],
                 "fill": {"added_px": int(m.sum()), "sources": ["back_panel:" + npart["of"]],
                          "colour": ["interior"]}})
