@@ -319,6 +319,35 @@ def test_plan_paints_plain_skin_under_the_facial_features():
     assert head["claim_unowned"] is True
 
 
+def test_split_hair_keeps_visible_long_hair_in_front():
+    H, W = 100, 100
+    nm = np.full((H, W), 0.4)
+    face = rect(H, W, 20, 60, 30, 70)
+    nm[face] = 0.45
+    top = rect(H, W, 10, 20, 30, 70)
+    nm[top] = 0.47
+    side = rect(H, W, 20, 90, 10, 25)          # long hair beside the face, a bit farther
+    nm[side] = 0.42
+    behind = rect(H, W, 62, 75, 75, 90)        # hair behind the neck
+    nm[behind] = 0.2
+    front, back = masks.split_hair(top | side | behind, nm, head=face)
+    assert front[15, 50] and front[50, 15] and back[70, 80] and not back[50, 15]
+    front, back = masks.split_hair(top | side, nm, head=face)
+    assert back is None and front.sum() == (top | side).sum()
+
+
+def test_plan_builds_back_hair_when_the_split_found_none():
+    H, W = 120, 120
+    rgb = np.full((H, W, 3), 80, np.uint8)
+    face = rect(H, W, 20, 80, 30, 90)
+    hair = rect(H, W, 5, 30, 25, 95)
+    rgb[face] = (225, 160, 135)
+    rgb[hair] = (40, 150, 110)
+    jobs = peel.plan([("face", face), ("hair_front", hair)], rgb)
+    bp = [j["back_panel"] for j in jobs if "back_panel" in j]
+    assert bp == [{"of": ["hair_front"], "tag": "hair_back", "hair": True, "below": "face"}]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

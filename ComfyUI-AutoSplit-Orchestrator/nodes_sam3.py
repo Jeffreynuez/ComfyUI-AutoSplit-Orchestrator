@@ -1177,17 +1177,17 @@ class AutoSplitOrchestratorSAM3:
                 report_lines.append("  WARN  '%s' -- could not find two sides" % part)
 
             if cluster_hair_front_back and pl == "hair":
-                comps = core_masks.components(s["mask"], min_area=80)
-                split = None
-                if len(comps) >= 2:
-                    a, b = comps[0], comps[1]
-                    na, nb = float(np.median(nm[a])), float(np.median(nm[b]))
-                    split = (a, b) if na >= nb else (b, a)
-                else:
-                    split = core_masks.split_by_depth(s["mask"], nm)
+                # back hair = hair behind the head (see core_masks.split_hair)
+                head = next((seg[q]["mask"] for q in parts
+                             if q.lower() in ("face", "head") and seg[q]["mask"] is not None), None)
+                split = core_masks.split_hair(s["mask"], nm, head=head)
                 if split:
                     add("hair_front", split[0], part, None, ["depth_split"])
-                    add("hair_back", split[1], part, None, ["depth_split"])
+                    if split[1] is not None:
+                        add("hair_back", split[1], part, None, ["depth_split"])
+                    else:
+                        report_lines.append("  INFO  'hair' -- no hair behind the head is visible;"
+                                            " all of it is front hair")
                     continue
             add(part, s["mask"], part)
 
