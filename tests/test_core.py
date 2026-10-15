@@ -364,6 +364,41 @@ def test_fill_node_finds_the_run_folders():
     assert nf._pick(opts, "klein", "9b", "fp8").endswith("kv-fp8.safetensors")
 
 
+def test_fill_node_names_the_passes_saved_without_transparency():
+    import importlib.util
+    import json
+    import tempfile
+    from PIL import Image
+    spec = importlib.util.spec_from_file_location(
+        "nodes_fill", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                   "ComfyUI-AutoSplit-Orchestrator", "nodes_fill.py"))
+    nf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nf)
+    root = tempfile.mkdtemp()
+
+    def pass_dir(name, mode):
+        d = os.path.join(root, name)
+        os.makedirs(d)
+        files = []
+        if mode:
+            a = np.zeros((20, 20, 4), np.uint8)
+            a[5:15, 5:15] = (200, 100, 50, 255)
+            solid = np.where(a[..., 3:] > 0, a[..., :3], 255).astype(np.uint8)
+            im = Image.fromarray(a) if mode == "alpha" else Image.fromarray(solid)
+            im.save(os.path.join(d, "x_part.png"))
+            files = [{"tag": "part", "file": "x_part.png"}]
+        with open(os.path.join(d, "parts_metadata.json"), "w") as f:
+            json.dump({"parts": files}, f)
+        return d
+
+    body_a, body_s = pass_dir("ba", "alpha"), pass_dir("bs", "solid")
+    face_a, face_s, face_0 = pass_dir("fa", "alpha"), pass_dir("fs", "solid"), pass_dir("f0", None)
+    assert nf.opaque_passes([body_a, face_a]) == []
+    assert nf.opaque_passes([body_a, face_s]) == ["facial"]
+    assert nf.opaque_passes([body_s, face_s]) == ["body", "facial"]
+    assert nf.opaque_passes([body_a, face_0]) == []
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
