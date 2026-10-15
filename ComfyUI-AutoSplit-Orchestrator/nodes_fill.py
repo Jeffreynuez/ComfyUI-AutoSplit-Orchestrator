@@ -57,18 +57,28 @@ def run_dir_from_report(report):
 
 def _has_alpha_parts(folder):
     """True when the pass's part PNGs carry their shape in the alpha channel
-    (output_mode alpha_mask); solid_background parts are opaque rectangles."""
+    (output_mode alpha_mask), False when they are opaque rectangles
+    (solid_background), None when the pass saved no parts."""
     from PIL import Image
     with open(os.path.join(folder, "parts_metadata.json"), encoding="utf-8") as f:
         meta = json.load(f)
     entries = meta if isinstance(meta, list) else meta.get("parts", [])
+    seen = False
     for e in entries[:6]:
         fp = os.path.join(folder, e.get("file", ""))
         if os.path.isfile(fp):
+            seen = True
             im = Image.open(fp)
             if im.mode in ("RGBA", "LA") and np.asarray(im.convert("RGBA"))[..., 3].min() < 128:
                 return True
-    return False
+    return False if seen else None
+
+
+def opaque_passes(runs):
+    """Names of the passes (runs[0] body, runs[1] facial) whose parts were
+    saved without transparency, so the fill cannot read their shapes."""
+    names = ("body", "facial")
+    return [names[min(i, 1)] for i, d in enumerate(runs) if _has_alpha_parts(d) is False]
 
 
 def _contact_sheet(view, thumbs, silhouette, height=1024, pad=0.08):
@@ -233,11 +243,13 @@ class AutoSplitFillKlein:
         with open(os.path.join(body_dir, "parts_metadata.json"), encoding="utf-8") as f:
             body_meta = json.load(f)
 
-        if not _has_alpha_parts(body_dir):
+        opaque = opaque_passes(runs)
+        if opaque:
             raise RuntimeError(
-                "Auto-Split Fill needs parts cut out with transparency: set the body orchestrator's "
-                "output_mode to 'alpha_mask' (it is '%s' in this run's parts) and run again."
-                % "solid_background")
+                "Auto-Split Fill needs parts cut out with transparency: set output_mode to "
+                "'alpha_mask' on the %s orchestrator%s (this run saved %s on a solid background) "
+                "and run again." % (" and ".join(opaque), "s" if len(opaque) > 1 else "",
+                                    "both passes" if len(opaque) > 1 else "its parts"))
         src = _to_rgb(image)
         H, W = src.shape[:2]
         jobs = peel.plan_runs(runs, src, base_layer=base_layer or peel.BASE_LAYER)
