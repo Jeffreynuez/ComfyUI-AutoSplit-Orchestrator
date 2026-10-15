@@ -23,6 +23,7 @@ def _load(name):
 evaluate = _load("evaluate")
 peel_merge = _load("peel_merge")
 peel_plan = _load("peel_plan")
+add_fill_group = _load("add_fill_group")
 
 
 def test_colour_sim_same_paint_scores_one_and_other_paint_zero():
@@ -65,6 +66,36 @@ def test_peel_workflow_wires_edit_into_a_full_size_split():
     assert o["part_labels"] == "skirt\ngreen skirt" and o["run_id"] == "garment_skirt"
     assert o["output_directory"] == "autosplit_fill/t" and o["auto_lr_split_parts"] == ""
     assert wf["42"]["inputs"]["filename_prefix"] == "autosplit_fill/t/garment_skirt_up"
+
+
+def test_add_fill_group_wires_the_fill_to_the_split():
+    def node(i, typ, inputs=(), outputs=()):
+        return {"id": i, "type": typ, "pos": [0, 100 * i], "size": [100, 100], "mode": 0,
+                "inputs": [{"name": n, "type": t, "link": l} for n, t, l in inputs],
+                "outputs": [{"name": n, "type": t, "links": ls} for n, t, ls in outputs]}
+    wf = {"last_node_id": 26, "last_link_id": 6, "groups": [{"id": 1, "bounding": [0, -500, 10, 10]}],
+          "nodes": [node(1, "LoadImage", outputs=[("IMAGE", "IMAGE", [1, 4])]),
+                    node(23, "DepthAnythingV2Preprocessor", outputs=[("IMAGE", "IMAGE", [2])]),
+                    node(10, "easy sam3ModelLoader", outputs=[("sam3_model", "EASY_SAM3_MODEL", [3])]),
+                    node(15, "AutoSplitOrchestratorSAM3",
+                         inputs=[("image", "IMAGE", 1), ("depth_map", "IMAGE", 2),
+                                 ("sam3_model", "EASY_SAM3_MODEL", 3)],
+                         outputs=[("report", "STRING", None), ("preview_grid", "IMAGE", None)]),
+                    node(24, "HeadCropUpscale", inputs=[("image", "IMAGE", 4)],
+                         outputs=[("cropped_image", "IMAGE", [5])]),
+                    node(26, "AutoSplitOrchestratorSAM3", inputs=[("image", "IMAGE", 5)],
+                         outputs=[("report", "STRING", None), ("preview_grid", "IMAGE", None)])],
+          "links": [[1, 1, 0, 15, 0, "IMAGE"], [2, 23, 0, 15, 1, "IMAGE"], [3, 10, 0, 15, 2, "EASY_SAM3_MODEL"],
+                    [4, 1, 0, 24, 0, "IMAGE"], [5, 24, 0, 26, 0, "IMAGE"]]}
+    fid = add_fill_group.add_fill_group(wf)
+    fill = next(n for n in wf["nodes"] if n["id"] == fid)
+    by_id = {l[0]: l for l in wf["links"]}
+    src = [(by_id[i["link"]][1], by_id[i["link"]][2]) for i in fill["inputs"]]
+    assert src == [(1, 0), (23, 0), (10, 0), (15, 0), (26, 0)]
+    assert wf["last_link_id"] == max(by_id) and wf["last_node_id"] >= fid + 1
+    assert by_id[fill["inputs"][3]["link"]][0] in next(n for n in wf["nodes"] if n["id"] == 15)["outputs"][0]["links"]
+    g = wf["groups"][-1]
+    assert g["bounding"][1] + g["bounding"][3] <= -500 + 1         # above the old groups
 
 
 if __name__ == "__main__":

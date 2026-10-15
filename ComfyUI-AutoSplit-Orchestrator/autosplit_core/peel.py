@@ -468,3 +468,33 @@ def rig_rules(names, cats, heads=()):
         if cats.get(n) == "garment" and _has(n, WRAP_WORDS) and "back" not in _words(n):
             out.append({"back_panel": {"of": n, "tag": readable(n) + " back"}})
     return out
+
+
+RULE_KEYS = ("hull", "underlap", "back_panel", "skin_under")
+STEP_KEYS = ("anchors", "colour", "exclude", "claim_unowned")
+
+
+def is_rule(job):
+    """A rule step (no picture edit): hull, underlap, back panel, skin under."""
+    return any(k in job for k in RULE_KEYS)
+
+
+def peel_step(job, image, run):
+    """The merge step (autosplit_core.fillmerge plan format) for a peel job
+    whose edited picture is `image` and whose split is the folder `run`."""
+    step = {"image": image, "run": run, "parts": job["parts"], "job": job["name"]}
+    for k in STEP_KEYS:
+        if k in job:
+            step[k] = job[k]
+    return step
+
+
+def plan_runs(runs, rgb, base_layer=BASE_LAYER):
+    """plan() for split folders: [body pass, facial pass] and the picture."""
+    from .parts import back_to_front, load_pass
+    H, W = rgb.shape[:2]
+    parts = []
+    for f in runs:
+        parts += load_pass(f)
+    btf = [(p.tag, p.full_mask(W, H)) for p in back_to_front(parts)]
+    return plan(btf, rgb, facial={p.tag for p in parts if p.facial}, base_layer=base_layer)

@@ -31,7 +31,18 @@ except Exception as e:
     HCROP_MAPPINGS = {}
     HCROP_DISPLAY = {}
 
-NODE_CLASS_MAPPINGS = {**SAM2_MAPPINGS, **SAM3_MAPPINGS, **MEXP_MAPPINGS, **LR_MAPPINGS, **HCROP_MAPPINGS}
-NODE_DISPLAY_NAME_MAPPINGS = {**SAM2_DISPLAY, **SAM3_DISPLAY, **MEXP_DISPLAY, **LR_DISPLAY, **HCROP_DISPLAY}
+# Hidden-area fill: Flux.2 Klein peels + rigging rules (requires SAM3)
+try:
+    from .nodes_fill import NODE_CLASS_MAPPINGS as FILL_MAPPINGS
+    from .nodes_fill import NODE_DISPLAY_NAME_MAPPINGS as FILL_DISPLAY
+except Exception as e:
+    print("[AutoSplit] Fill node not loaded: %s" % e)
+    FILL_MAPPINGS = {}
+    FILL_DISPLAY = {}
+
+NODE_CLASS_MAPPINGS = {**SAM2_MAPPINGS, **SAM3_MAPPINGS, **MEXP_MAPPINGS, **LR_MAPPINGS, **HCROP_MAPPINGS,
+                       **FILL_MAPPINGS}
+NODE_DISPLAY_NAME_MAPPINGS = {**SAM2_DISPLAY, **SAM3_DISPLAY, **MEXP_DISPLAY, **LR_DISPLAY, **HCROP_DISPLAY,
+                              **FILL_DISPLAY}
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

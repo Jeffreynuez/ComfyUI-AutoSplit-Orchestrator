@@ -37,7 +37,6 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "ComfyUI-AutoSplit-Orchestrator"))
 from autosplit_core import peel  # noqa: E402
 from klein_workflows import edit_full  # noqa: E402
-from partsio import back_to_front, load_pass  # noqa: E402
 
 DEFAULT_TEMPLATE = os.path.join(ROOT, "2D_Character_AutoSplit_SAM3.json")
 
@@ -93,24 +92,16 @@ def build(runs, source, comfy_image, comfy_output, subdir, out, template=DEFAULT
     """Write the peel workflows, jobs.json and plan.json into `out`.
     Returns (workflow paths in run order, plan path)."""
     rgb = np.asarray(Image.open(source).convert("RGB"))
-    H, W = rgb.shape[:2]
-    parts = []
-    for f in runs:
-        parts += load_pass(f)
-    order = back_to_front(parts)
-    btf = [(p.tag, p.full_mask(W, H)) for p in order]
-    facial = {p.tag for p in parts if p.facial}
-    jobs = peel.plan(btf, rgb, facial=facial, base_layer=base_layer)
+    jobs = peel.plan_runs(runs, rgb, base_layer=base_layer)
 
     tmpl = _template_nodes(template)
     os.makedirs(out, exist_ok=True)
     plan, summary, workflows = [], [], []
     out_base = os.path.join(comfy_output, *subdir.split("/"))
     for job in jobs:
-        rule = next((k for k in ("hull", "underlap", "back_panel", "skin_under") if k in job), None)
-        if rule:
+        if peel.is_rule(job):
             plan.append(job)
-            summary.append({"rule": {rule: job[rule]}})
+            summary.append({"rule": job})
             continue
         if model != "auto":
             job["model"] = model
@@ -119,13 +110,8 @@ def build(runs, source, comfy_image, comfy_output, subdir, out, template=DEFAULT
         with open(wf_path, "w", encoding="utf-8") as f:
             json.dump(wf, f, indent=1)
         workflows.append(wf_path)
-        step = {"image": os.path.join(out_base, job["name"] + "_up_00001_.png"),
-                "run": os.path.join(out_base, job["name"]),
-                "parts": job["parts"], "job": job["name"]}
-        for k in ("anchors", "colour", "exclude", "claim_unowned"):
-            if k in job:
-                step[k] = job[k]
-        plan.append(step)
+        plan.append(peel.peel_step(job, os.path.join(out_base, job["name"] + "_up_00001_.png"),
+                                   os.path.join(out_base, job["name"])))
         summary.append({k: job[k] for k in ("name", "kind", "model", "targets", "removes", "prompt",
                                             "sam_labels") if k in job})
     plan_path = os.path.join(out, "plan.json")

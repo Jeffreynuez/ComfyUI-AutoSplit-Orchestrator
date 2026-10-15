@@ -54,14 +54,14 @@ A worked example is committed in [`examples/salena/`](examples/salena/): the 27 
 
 | Path | What it is |
 |---|---|
-| `ComfyUI-AutoSplit-Orchestrator/` | The custom ComfyUI nodes: `AutoSplitOrchestratorSAM3` (the main orchestrator), `HeadCropUpscale`, `AsymmetricMaskExpand`, `SplitLeftRight`, and the legacy SAM 2 orchestrator. |
-| `ComfyUI-AutoSplit-Orchestrator/autosplit_core/` | The logic the node uses, free of ComfyUI so it can be tested on its own: mask cleanup, left/right assignment, evidence-based draw order, facial merge. |
+| `ComfyUI-AutoSplit-Orchestrator/` | The custom ComfyUI nodes: `AutoSplitOrchestratorSAM3` (the main orchestrator), `HeadCropUpscale`, `AutoSplitFillKlein` (the hidden-area fill), `AsymmetricMaskExpand`, `SplitLeftRight`, and the legacy SAM 2 orchestrator. |
+| `ComfyUI-AutoSplit-Orchestrator/autosplit_core/` | The logic the nodes use, free of ComfyUI so it can be tested on its own: mask cleanup, left/right assignment, evidence-based draw order, facial merge, pixel ownership, fill planning (`peel.py`), rigging rules (`rigfill.py`) and the fill merge (`fillmerge.py`). |
 | `krita_plugin/autosplit_studio/` | The Krita plugin: a docker with **Split Character**, **Export to Spine** and **Generate Skin**. Standard library only, so it runs in Krita's bundled Python with nothing to install. |
 | `krita_plugin/autosplit_studio/comfy_client.py` | The ComfyUI client every entry point shares: upload, queue with a run id, wait, read the run's metadata, place parts, order them. |
 | `2D_Character_AutoSplit_SAM3.json` | The ComfyUI workflow in API format. |
 | `comfy_autosplit_test.py` | Runs a split from a terminal, without Krita. |
 | `spine_export.py` | Writes a Spine project from a run (`--run-id`, or `--body` / `--face` folders). |
-| `tools/` | Ground truth from a layered PSD (`gt_from_psd.py`), scoring (`evaluate.py`), the exploded-view sheet above (`wiggle.py`), offline re-ordering of old runs (`reorder_run.py`), and `link_dev_install.cmd`. |
+| `tools/` | Ground truth from a layered PSD (`gt_from_psd.py`), scoring (`evaluate.py`, `part_diff.py`), the exploded-view sheet above (`wiggle.py`), the fill from a terminal (`run_fill.py`, `peel_plan.py`, `peel_merge.py`), adding the fill group to a workflow (`add_fill_group.py`), offline re-ordering of old runs (`reorder_run.py`), and `link_dev_install.cmd`. |
 | `tests/` | Unit tests for `autosplit_core` and a smoke test of the node with a fake SAM 3. |
 | `examples/salena/` | Sample output: part PNGs and the Spine skeleton JSON. |
 | `restyle_test.py`, `Flux_Klein_Krita_Inpaint.json`, `NovaAnimeXL_Krita_Inpaint.json` | The restyle path behind **Generate Skin**. Being rebuilt; see Limitations. |
@@ -115,6 +115,24 @@ python comfy_autosplit_test.py path\to\character.png
 python spine_export.py --run-id <the run id it printed> --character MyCharacter
 ```
 
+### Filling the hidden areas (ComfyUI)
+
+The **Auto-Split Fill (Klein peels)** node fills what each part hides behind the others, so the parts hold up when they move. Put it in its own group above the split and wire it to the orchestrators:
+
+```
+python tools/add_fill_group.py "<ComfyUI>/user/default/workflows/<your workflow>.json"
+```
+
+That adds the node, a preview and a report in a bypassable group, with the image, depth map and SAM 3 model taken from the body orchestrator and both orchestrators' `report` outputs wired in (a `.bak` copy of the workflow is kept). The parts must be cut with `output_mode` = `alpha_mask`.
+
+What the node does, with no per-character prompts:
+
+1. plans "peels" from the part labels, draw order and colours (`autosplit_core/peel.py`), such as the base body in a plain top and briefs, the skirt without the sash, the jacket without the arms, and the head without the hair;
+2. makes each one with Flux.2 Klein, 4B, or 9B when whole arms or legs come off, and splits it again with SAM 3;
+3. merges the peeled shapes into the hidden areas and applies the rigging conventions (`autosplit_core/rigfill.py`): limbs continue under the part they join, open garments get their own back layer (`jacket back`, `skirt back`), back hair and garment backs are painted in deep shadow, and the head is plain skin under the facial features.
+
+It writes `<body pass>_filled/` (the filled parts, same layout as a split) and `<body pass>_fill/` (the edits and their splits). It takes about a minute and a half on an RTX 4080 Super. `base_layer` is the rig's convention for what the base body wears. The same fill runs from a terminal with `python tools/run_fill.py --run <body run> --run <facial run> --source <picture>`.
+
 ### Measuring a change
 
 ```
@@ -131,13 +149,7 @@ The map file ties the tool's part names to the PSD's layer names (`tools/gt_maps
 
 ## Limitations
 
-- **Hidden-region fill is a prototype outside the node.** Each part is the pixels you can see, so pulling the parts apart shows holes where one part covered another (the exploded view above). `tools/run_fill.py` fills them by "peeling": Flux.2 Klein edits of the picture with the front layers removed in the same pose, planned from the part labels and draw order (no per-character prompts), split again with SAM 3 and merged into the hidden areas. Rigging conventions are then applied by rule (`autosplit_core/rigfill.py`): limbs continue under the part they join (thigh under the briefs, sleeve under the jacket, neck behind the head), open garments get their own back layer (`jacket back`, `skirt back`) behind the body, back hair and garment backs are painted in deep shadow, and the head is plain skin under the facial features. On Salena it scores Rig Match 0.684 against the hand-cut rig (0.470 without fill; 0.624 with hand-written prompts), and 0.671 on a second, more turned view of her that none of the rules were tuned on (0.399 without fill). It needs a running ComfyUI with the Klein 4B and 9B models:
-
-  ```
-  python tools/run_fill.py --run <body run> --run <facial run> --source <picture> [--base-layer "a light green sports bra and briefs"]
-  ```
-
-  `--base-layer` is the rig's convention for what the base body wears (default: a plain sports top and briefs). The old OpenCV fill is still in the node (`enable_inpainting`) but off by default, because it leaves grey smears.
+- **The hidden-area fill is close but not yet at the rigger's level.** With the fill node (above), Salena scores Rig Match 0.684 against the hand-cut rig (0.470 without fill; 0.624 with hand-written prompts). On a second, more turned view of her that none of the rules were tuned on, it scores 0.671 (0.399 without fill). What is left is mostly the rig's own choices: the colour of the base layer, back hair longer than a front view shows, and the far arm behind the body. The old OpenCV fill is still in the orchestrator (`enable_inpainting`) but off by default, because it leaves grey smears.
 - **One ground-truth character so far.** The numbers above are one character in two views (`salena_fa`, `salena_fa2`). More hand-cut rigs are needed before the draw-order weights and fill conventions can be trusted beyond her.
 - **Parts that contain a neighbour** (jacket with sleeves, skirt with sash) are kept as SAM 3 returns them; deciding which part owns the shared pixels is not done yet.
 - **Generate Skin is being rebuilt.** Its checkpoints were retired; the restyle path will move to Flux Klein.
