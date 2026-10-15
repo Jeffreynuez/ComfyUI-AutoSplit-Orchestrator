@@ -348,6 +348,22 @@ def test_plan_builds_back_hair_when_the_split_found_none():
     assert bp == [{"of": ["hair_front"], "tag": "hair_back", "hair": True, "below": "face"}]
 
 
+def test_fill_node_finds_the_run_folders():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "nodes_fill", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                   "ComfyUI-AutoSplit-Orchestrator", "nodes_fill.py"))
+    nf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nf)
+    rep = "Parts: 18\n  WARN  something\n  Output: C:\\out\\autosplit_eval\\p1_body\\f2b"
+    assert nf.run_dir_from_report(rep) == "C:\\out\\autosplit_eval\\p1_body\\f2b"
+    assert nf.run_dir_from_report("") is None
+    opts = ["Flux1\\x.safetensors", "Flux2\\flux-2-klein-9b-int8-convrot.safetensors",
+            "Flux2\\flux-2-klein-9b-kv-fp8.safetensors", "Flux2\\flux-2-klein-4b-fp8.safetensors"]
+    assert nf._pick(opts, "klein", "4b").endswith("4b-fp8.safetensors")
+    assert nf._pick(opts, "klein", "9b", "fp8").endswith("kv-fp8.safetensors")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
